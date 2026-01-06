@@ -1,17 +1,5 @@
 /* HKI Navigation Card
  * Highly Customizable Navigation Bar
- *
- * - Fixed-position FAB style navigation/action buttons
- * - Base button is mandatory and always visible
- * - Horizontal + Vertical groups
- * - Center position: vertical always hidden
- * - Groups can be temporarily opened via actions; auto-close after any non-toggle-group action
- * - Supports button types including pill buttons
- * - Service calls support YAML (no external jsyaml needed)
- * - Robust tap handling: tap / double-tap / hold
- * - Sidebar-aware auto offset for bottom-left
- * - Conditions: entity/user/view/screen (core-like)
- * - Editor: expansion panels, entity pickers, demo mode preview
  */
 
 const _getLit = () => {
@@ -32,6 +20,7 @@ const CARD_TAG = "hki-navigation-card";
 const EDITOR_TAG = "hki-navigation-card-editor";
 
 const INHERIT = "__inherit__";
+const MIN_PILL_WIDTH = 85;
 
 const BUTTON_TYPES = [
   { value: "icon", label: "Icon Only" },
@@ -208,17 +197,8 @@ function normalizeButtonType(type, fallback) {
   return fallback;
 }
 
-/* -------------------- Minimal YAML parser (no external deps) --------------------
- * Supports:
- * - mappings, nested mappings via indentation
- * - lists via "-"
- * - scalars: string, number, boolean, null
- * - inline JSON for convenience: {a:1} / [1,2]
- *
- * This is intentionally small but robust enough for typical HA service_data.
- */
+/* -------------------- Minimal YAML parser (no external deps) -------------------- */
 function _stripYamlComment(line) {
-  // remove # comments unless inside quotes (simple heuristic)
   let inS = false;
   let inD = false;
   for (let i = 0; i < line.length; i++) {
@@ -237,9 +217,7 @@ function _parseScalar(raw) {
   if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
     try {
       return JSON.parse(s);
-    } catch (_) {
-      // fall through
-    }
+    } catch (_) {}
   }
 
   const lower = s.toLowerCase();
@@ -247,13 +225,11 @@ function _parseScalar(raw) {
   if (lower === "true" || lower === "yes" || lower === "on") return true;
   if (lower === "false" || lower === "no" || lower === "off") return false;
 
-  // number
   if (/^-?\d+(\.\d+)?$/.test(s)) {
     const n = Number(s);
     if (Number.isFinite(n)) return n;
   }
 
-  // quoted
   if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
     return s.slice(1, -1);
   }
@@ -265,7 +241,6 @@ function parseYamlLite(yamlStr) {
   const src = safeString(yamlStr);
   const lines = src.split("\n");
 
-  // Precompute next non-empty line index for lookahead
   const nextNonEmpty = new Array(lines.length).fill(-1);
   let next = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -282,13 +257,8 @@ function parseYamlLite(yamlStr) {
   };
 
   const ensureContainerForKey = (parent, key, kind) => {
-    if (kind === "list") parent[key] = [];
-    else parent[key] = {};
+    parent[key] = kind === "list" ? [] : {};
     return parent[key];
-  };
-
-  const setInMap = (map, key, value) => {
-    map[key] = value;
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -301,16 +271,11 @@ function parseYamlLite(yamlStr) {
     popToIndent(indent);
     const top = stack[stack.length - 1];
 
-    // list item
     if (line.startsWith("-")) {
-      // Ensure current container is a list
       if (top.kind !== "list") {
-        // Convert empty map placeholder into list if possible
-        // If it's root map but user started with "-", treat root as list
         if (stack.length === 1) {
           stack[0] = { indent: -1, kind: "list", value: [] };
         } else {
-          // if parent is map, we cannot infer key here reliably -> error
           throw new Error("YAML: list item found where a mapping was expected.");
         }
       }
@@ -319,10 +284,10 @@ function parseYamlLite(yamlStr) {
       const itemRest = line.replace(/^-/, "").trim();
 
       if (itemRest === "") {
-        // decide container by lookahead
         const ni = nextNonEmpty[i];
         const nextLine = ni >= 0 ? _stripYamlComment(lines[ni]).trim() : "";
         const nextIndent = ni >= 0 ? _stripYamlComment(lines[ni]).match(/^\s*/)[0].length : -1;
+
         if (ni >= 0 && nextIndent > indent && nextLine.startsWith("-")) {
           const child = [];
           list.push(child);
@@ -337,7 +302,6 @@ function parseYamlLite(yamlStr) {
         continue;
       }
 
-      // inline "- key: val" mapping support
       const colonIdx = itemRest.indexOf(":");
       if (colonIdx > -1) {
         const k = itemRest.slice(0, colonIdx).trim();
@@ -346,6 +310,7 @@ function parseYamlLite(yamlStr) {
           const ni = nextNonEmpty[i];
           const nextLine = ni >= 0 ? _stripYamlComment(lines[ni]).trim() : "";
           const nextIndent = ni >= 0 ? _stripYamlComment(lines[ni]).match(/^\s*/)[0].length : -1;
+
           const child = {};
           child[k] = (ni >= 0 && nextIndent > indent && nextLine.startsWith("-")) ? [] : {};
           list.push(child);
@@ -359,19 +324,16 @@ function parseYamlLite(yamlStr) {
         continue;
       }
 
-      // plain scalar list item
       list.push(_parseScalar(itemRest));
       continue;
     }
 
-    // mapping key: value
     const idx = line.indexOf(":");
     if (idx === -1) throw new Error(`YAML: expected "key: value" but got "${line}"`);
 
     const key = line.slice(0, idx).trim();
     let vRaw = line.slice(idx + 1).trim();
 
-    // Ensure top is map
     if (stack[stack.length - 1].kind !== "map") {
       throw new Error("YAML: mapping entry found where a list was expected.");
     }
@@ -379,28 +341,24 @@ function parseYamlLite(yamlStr) {
     const map = stack[stack.length - 1].value;
 
     if (vRaw === "") {
-      // Lookahead to decide if this becomes a list or map
       const ni = nextNonEmpty[i];
       const nextLine = ni >= 0 ? _stripYamlComment(lines[ni]).trim() : "";
       const nextIndent = ni >= 0 ? _stripYamlComment(lines[ni]).match(/^\s*/)[0].length : -1;
 
       if (ni >= 0 && nextIndent > indent && nextLine.startsWith("-")) {
         const child = ensureContainerForKey(map, key, "list");
-        stack.push({ indent, kind: "map", value: map });
         stack.push({ indent: indent + 2, kind: "list", value: child });
       } else if (ni >= 0 && nextIndent > indent) {
         const child = ensureContainerForKey(map, key, "map");
-        stack.push({ indent, kind: "map", value: map });
         stack.push({ indent: indent + 2, kind: "map", value: child });
       } else {
-        setInMap(map, key, null);
+        map[key] = null;
       }
     } else {
-      setInMap(map, key, _parseScalar(vRaw));
+      map[key] = _parseScalar(vRaw);
     }
   }
 
-  // If root was converted to list
   if (Array.isArray(stack[0].value)) return stack[0].value;
   return root;
 }
@@ -416,22 +374,16 @@ const DEFAULT_BUTTON = () => ({
 
   button_type: "",
 
-  // Button style overrides
   background: "",
-  background_opacity: "", // per-button override (0..1)
+  background_opacity: "",
   icon_color: "",
 
-  // Label style overrides
   label_style: {},
-
-  // Optional per-button pill width override
   pill_width: "",
 
-  // Visibility conditions
   conditions_mode: "all",
   conditions: [],
 
-  // Actions
   tap_action: { action: "navigate", navigation_path: "/" },
   hold_action: { action: "none" },
   double_tap_action: { action: "none" },
@@ -440,7 +392,6 @@ const DEFAULT_BUTTON = () => ({
 const DEFAULTS = {
   type: `custom:${CARD_TYPE}`,
 
-  // Requested defaults
   position: "bottom-right",
   offset_x: 70,
   offset_y: 20,
@@ -448,37 +399,29 @@ const DEFAULTS = {
   gap: 12,
   z_index: 5,
 
-  base: { button: DEFAULT_BUTTON() }, // mandatory
+  base: { button: DEFAULT_BUTTON() },
 
   horizontal: { enabled: true, columns: 6, buttons: [] },
   vertical: { enabled: false, rows: 6, buttons: [] },
 
-  // Theme-following defaults (blank => theme vars)
   default_background: "",
-  default_button_opacity: 1, // NEW global button opacity
+  default_button_opacity: 1,
   default_icon_color: "",
 
   default_button_type: "icon",
 
-  // Global label style
   label_style: { ...DEFAULT_LABEL_STYLE },
 
-  // Global pill width; used when pill type selected; 0=auto
   pill_width: 0,
 
-  // Center options
   center_spread: false,
 
-  // Sidebar awareness
-  sidebar_offset_mode: "auto", // auto | manual
-  // bottom-right (kept for back-compat, but auto doesn't shift right)
+  sidebar_offset_mode: "auto",
   offset_x_sidebar_closed: 70,
   offset_x_sidebar_open: 260,
-  // bottom-left (new)
   offset_x_sidebar_closed_left: 70,
   offset_x_sidebar_open_left: 260,
 
-  // Back-compat
   buttons: undefined,
   default_label_position: undefined,
   default_show_label: undefined,
@@ -503,7 +446,6 @@ function ensureConditionIdsInList(list) {
   const next = arr.map((b) => {
     if (!b || typeof b !== "object") return b;
 
-    // normalize condition objects
     const conds = Array.isArray(b.conditions) ? b.conditions : [];
     let local = false;
     const nextConds = conds.map((c) => {
@@ -513,7 +455,6 @@ function ensureConditionIdsInList(list) {
         cc.id = _uid();
         local = true;
       }
-      // back-compat: type missing => entity
       if (!cc.type) cc.type = "entity";
       return cc;
     });
@@ -549,14 +490,12 @@ function normalizeConfig(cfg) {
   const base = { ...(raw.base || {}) };
   base.button = { ...DEFAULT_BUTTON(), ...(base.button || {}) };
   if (!base.button.id) base.button.id = _uid();
-  // Remove base conditions (always visible)
   delete base.button.conditions;
   delete base.button.conditions_mode;
 
   const horizontal = { ...DEFAULTS.horizontal, ...(raw.horizontal || {}) };
   const vertical = { ...DEFAULTS.vertical, ...(raw.vertical || {}) };
 
-  // Back-compat: single buttons list
   const hasNewLists =
     (Array.isArray(horizontal.buttons) && horizontal.buttons.length > 0) ||
     (Array.isArray(vertical.buttons) && vertical.buttons.length > 0);
@@ -600,7 +539,6 @@ function normalizeConfig(cfg) {
 
   c.default_button_type = normalizeButtonType(c.default_button_type, DEFAULTS.default_button_type);
 
-  // Back-compat default label settings
   if (!cfg?.default_button_type && (cfg?.default_label_position || cfg?.default_show_label !== undefined)) {
     if (cfg?.default_show_label) {
       const lp = cfg.default_label_position;
@@ -614,6 +552,8 @@ function normalizeConfig(cfg) {
   }
 
   c.pill_width = clampNum(c.pill_width, 0);
+  if (c.pill_width > 0 && c.pill_width < MIN_PILL_WIDTH) c.pill_width = MIN_PILL_WIDTH;
+
   c.center_spread = !!c.center_spread;
 
   c.sidebar_offset_mode = c.sidebar_offset_mode === "manual" ? "manual" : "auto";
@@ -622,7 +562,6 @@ function normalizeConfig(cfg) {
   c.offset_x_sidebar_closed_left = clampNum(c.offset_x_sidebar_closed_left, c.offset_x);
   c.offset_x_sidebar_open_left = clampNum(c.offset_x_sidebar_open_left, DEFAULTS.offset_x_sidebar_open_left);
 
-  // Ensure ids + normalize condition ids/types
   {
     const [hb] = ensureButtonIdsInList(c.horizontal.buttons);
     const [vb] = ensureButtonIdsInList(c.vertical.buttons);
@@ -646,13 +585,11 @@ function clamp01(n) {
   return Math.max(0, Math.min(1, x));
 }
 
-// background-only opacity for any css color/var using color-mix
 function applyBgOpacity(color, opacity01) {
   const o = clamp01(opacity01);
   if (o >= 1) return color;
   if (o <= 0) return "transparent";
-  const pct = Math.round(o * 1000) / 10; // 0.1%
-  // Works with vars in modern browsers used by HA
+  const pct = Math.round(o * 1000) / 10;
   return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
 }
 
@@ -672,18 +609,22 @@ class HkiNavigationCard extends LitElement {
 
     this._groupOverride = { horizontal: null, vertical: null };
 
-    // Drawer state (sidebar)
-    this._drawerOpen = false;
     this._drawerWidth = 0;
+    this._drawerExpanded = false;
     this._drawerObs = null;
 
-    // Tap handling
     this._tapState = { lastId: null, lastTime: 0, singleTimer: null };
     this._holdTimers = new Map();
 
-    // Dynamic measured layout
-    this._layout = { ready: false, slots: {} };
+    this._layout = { ready: false, slots: {}, meta: {} };
     this._measureRaf = null;
+
+    this._onResize = () => {
+      this._readDrawerState();
+      this._layout = { ready: false, slots: {}, meta: {} };
+      this.requestUpdate();
+      this._scheduleMeasure();
+    };
   }
 
   connectedCallback() {
@@ -700,88 +641,103 @@ class HkiNavigationCard extends LitElement {
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
   }
 
-  _onResize = () => {
-    this._readDrawerState();
-    this._layout = { ready: false, slots: {} };
-    this.requestUpdate();
-    this._scheduleMeasure();
-  };
-
-  updated(changedProps) {
-    super.updated?.(changedProps);
+  updated() {
+    super.updated?.();
     this._scheduleMeasure();
   }
 
   _scheduleMeasure() {
     if (!this._config) return;
-    // only measure in corner modes (fixed grid)
     if (this._config.position === "bottom-center") return;
 
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
     this._measureRaf = requestAnimationFrame(() => this._measureAndLayout());
   }
 
-  _findDrawer() {
-    const direct = document.querySelector("ha-drawer");
-    if (direct) return direct;
+  // Deep query into shadow DOMs (robust across HA versions)
+  _queryDeep(selector, root = document, maxDepth = 12) {
+    const results = [];
+    const visited = new Set();
 
-    const ha = document.querySelector("home-assistant");
-    const sr1 = ha?.shadowRoot;
-    const d1 = sr1?.querySelector("ha-drawer");
-    if (d1) return d1;
+    const walk = (node, depth) => {
+      if (!node || depth > maxDepth || visited.has(node)) return;
+      visited.add(node);
 
-    const main = sr1?.querySelector("home-assistant-main");
-    const sr2 = main?.shadowRoot;
-    const d2 = sr2?.querySelector("ha-drawer");
-    if (d2) return d2;
+      try {
+        if (node.querySelectorAll) {
+          node.querySelectorAll(selector).forEach((el) => results.push(el));
+        }
+      } catch (_) {}
 
-    return null;
+      // traverse children
+      const children = node instanceof ShadowRoot ? node.host?.children : node.children;
+      if (children && children.length) {
+        for (const ch of children) walk(ch, depth + 1);
+      }
+
+      // shadow root
+      const sr = node.shadowRoot;
+      if (sr) walk(sr, depth + 1);
+    };
+
+    walk(root, 0);
+    return results;
   }
 
   _readDrawerState() {
-    const drawer = this._findDrawer();
-    if (!drawer) {
-      this._drawerOpen = false;
-      this._drawerWidth = 0;
-      return;
+    // Try multiple known sidebar/drawer elements in HA
+    const candidates = [
+      ...this._queryDeep("ha-drawer"),
+      ...this._queryDeep("ha-sidebar"),
+      ...this._queryDeep("mwc-drawer"),
+      ...this._queryDeep("app-drawer-layout"),
+    ];
+
+    let best = null;
+    let bestWidth = 0;
+
+    for (const el of candidates) {
+      try {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden") continue;
+
+        // must cover left edge
+        if (rect.right <= 0) continue;
+        if (rect.width > bestWidth && rect.left <= 2) {
+          bestWidth = rect.width;
+          best = el;
+        }
+      } catch (_) {}
     }
 
-    const open =
-      drawer.hasAttribute("open") ||
-      drawer.hasAttribute("opened") ||
-      drawer.opened === true ||
-      drawer.open === true ||
-      drawer.classList?.contains("opened");
+    this._drawerWidth = bestWidth || 0;
 
-    this._drawerOpen = !!open;
+    // Expanded vs collapsed: collapsed is usually ~56-72px, expanded ~200-320px
+    this._drawerExpanded = (this._drawerWidth >= 120);
 
-    try {
-      const rect = drawer.getBoundingClientRect();
-      this._drawerWidth = rect?.width ? rect.width : 0;
-    } catch (_) {
-      this._drawerWidth = 0;
-    }
+    return best;
   }
 
   _setupDrawerObserver() {
-    this._readDrawerState();
-
-    const drawer = this._findDrawer();
+    const drawer = this._readDrawerState();
     if (!drawer) return;
 
     try {
       this._drawerObs = new MutationObserver(() => {
         this._readDrawerState();
         this.requestUpdate();
+        this._scheduleMeasure();
       });
-      this._drawerObs.observe(drawer, { attributes: true, attributeFilter: ["open", "opened", "class", "style"] });
+      this._drawerObs.observe(drawer, { attributes: true, childList: true, subtree: false });
     } catch (_) {}
   }
 
   setConfig(config) {
     if (!config) throw new Error("Invalid configuration");
     this._config = normalizeConfig(config);
-    this._layout = { ready: false, slots: {} };
+    this._layout = { ready: false, slots: {}, meta: {} };
+    this._readDrawerState();
     this.requestUpdate();
     this._scheduleMeasure();
   }
@@ -805,10 +761,12 @@ class HkiNavigationCard extends LitElement {
     const per = btn?.pill_width;
     if (_hasMeaningfulNumber(per)) {
       const n = _toNumber(per);
-      return n > 0 ? n : 0;
+      if (n <= 0) return 0;
+      return Math.max(MIN_PILL_WIDTH, n);
     }
     const g = clampNum(this._config.pill_width, 0);
-    return g > 0 ? g : 0;
+    if (g > 0) return Math.max(MIN_PILL_WIDTH, g);
+    return 0;
   }
 
   _buttonOpacity(btn) {
@@ -869,7 +827,7 @@ class HkiNavigationCard extends LitElement {
     ].join(";");
   }
 
-  /* -------------------------- Conditions (core-like) -------------------------- */
+  /* -------------------------- Conditions -------------------------- */
 
   _evalCondition(cond) {
     const hass = this.hass;
@@ -921,10 +879,9 @@ class HkiNavigationCard extends LitElement {
     } else if (type === "view") {
       const path = window.location?.pathname || "";
       const list = Array.isArray(cond.views) ? cond.views : [];
-      // match exact or suffix for convenience
       result = list.length === 0 ? true : list.some((v) => v === path || path.endsWith(v));
     } else if (type === "screen") {
-      const mode = cond.mode || "mobile"; // mobile | desktop
+      const mode = cond.mode || "mobile";
       const isMobile = window.matchMedia?.("(max-width: 800px)")?.matches ?? false;
       result = mode === "mobile" ? isMobile : !isMobile;
     }
@@ -1004,25 +961,22 @@ class HkiNavigationCard extends LitElement {
   _computeOffsetX() {
     const c = this._config;
 
-    // auto affects bottom-left only (to avoid being hidden behind sidebar)
     if (c.sidebar_offset_mode === "manual") {
       if (c.position === "bottom-left") {
-        return this._drawerOpen ? c.offset_x_sidebar_open_left : c.offset_x_sidebar_closed_left;
+        return this._drawerExpanded ? c.offset_x_sidebar_open_left : c.offset_x_sidebar_closed_left;
       }
       if (c.position === "bottom-right") {
-        return this._drawerOpen ? c.offset_x_sidebar_open : c.offset_x_sidebar_closed;
+        return this._drawerExpanded ? c.offset_x_sidebar_open : c.offset_x_sidebar_closed;
       }
       return c.offset_x;
     }
 
-    // auto
+    // AUTO: only bottom-left shifts away from expanded sidebar
     if (c.position === "bottom-left") {
-      const extra = this._drawerOpen ? (this._drawerWidth || 0) : 0;
-      if (extra > 40) return c.offset_x + extra;
+      if (this._drawerExpanded && this._drawerWidth > 0) return c.offset_x + this._drawerWidth;
       return c.offset_x;
     }
 
-    // bottom-right & center: do not shift
     return c.offset_x;
   }
 
@@ -1038,89 +992,119 @@ class HkiNavigationCard extends LitElement {
     const slotEls = Array.from(root.querySelectorAll(".abs-slot"));
     if (!slotEls.length) return;
 
-    const slotMeta = slotEls.map((el) => {
+    const widthByKey = {};
+    const heightByKey = {};
+
+    for (const el of slotEls) {
       const slotId = el.getAttribute("data-slot-id") || "";
       const fab = el.querySelector(".fab");
-      const w = fab ? fab.getBoundingClientRect().width : c.button_size;
-      const h = fab ? fab.getBoundingClientRect().height : c.button_size;
-      return { slotId, w: Math.max(w, 1), h: Math.max(h, 1) };
-    });
+      const rect = fab ? fab.getBoundingClientRect() : null;
+      widthByKey[slotId] = rect?.width ? Math.max(rect.width, 1) : c.button_size;
+      heightByKey[slotId] = rect?.height ? Math.max(rect.height, 1) : c.button_size;
+    }
 
-    // Build slot plan consistent with renderCornerSlots()
     const plan = this._cornerSlotPlan();
     if (!plan) return;
 
-    // Map widths by key
-    const widthByKey = {};
-    for (const m of slotMeta) widthByKey[m.slotId] = m.w;
-
     const gap = c.gap;
     const stepY = c.button_size + gap;
-    const dir = c.position === "bottom-right" ? -1 : 1;
+    const isRight = c.position === "bottom-right";
 
-    // Determine max columns used in horizontal block (including base col 0)
-    const maxHCols = Math.max(1, plan.hColsTotal);
+    const baseW = widthByKey[plan.baseKey] ?? c.button_size;
 
-    // Compute column widths for horizontal grid by max per column
-    const colWidths = new Array(maxHCols).fill(c.button_size);
+    // Horizontal column widths: cols 1..N use max per column
+    const cols = Math.max(1, c.horizontal.columns);
+    const hColW = new Array(cols).fill(c.button_size);
+
     for (const s of plan.slots) {
       if (s.area !== "h") continue;
       const w = widthByKey[s.key] ?? c.button_size;
-      colWidths[s.col] = Math.max(colWidths[s.col], w);
-    }
-    // base width is col 0
-    if (plan.baseKey) {
-      const bw = widthByKey[plan.baseKey] ?? c.button_size;
-      colWidths[0] = Math.max(colWidths[0], bw);
+      const colIdx = s.col - 1; // plan col starts at 1
+      if (colIdx >= 0 && colIdx < cols) hColW[colIdx] = Math.max(hColW[colIdx], w);
     }
 
-    // prefix sums
-    const colX = new Array(maxHCols).fill(0);
-    for (let i = 1; i < maxHCols; i++) {
-      colX[i] = colX[i - 1] + colWidths[i - 1] + gap;
-    }
-    const hBlockWidth = colX[maxHCols - 1] + colWidths[maxHCols - 1];
+    // Total horizontal span from base edge outward
+    const hSpan = baseW + (cols > 0 ? (gap * cols) : 0) + hColW.reduce((a, b) => a + b, 0);
 
-    // Vertical wrap columns widths
-    const vWrapWidths = new Array(plan.vWrapCols).fill(c.button_size);
+    // Vertical wrap columns widths (wrapCol>=1 go beyond horizontal span)
+    const vWrapCols = plan.vWrapCols || 0;
+    const vWrapW = new Array(vWrapCols).fill(c.button_size);
     for (const s of plan.slots) {
       if (s.area !== "v") continue;
       const w = widthByKey[s.key] ?? c.button_size;
-      vWrapWidths[s.wrapCol] = Math.max(vWrapWidths[s.wrapCol], w);
+      const wc = s.wrapCol;
+      if (wc >= 0 && wc < vWrapCols) vWrapW[wc] = Math.max(vWrapW[wc], w);
     }
-    // prefix sums for wrap cols
-    const vWrapX = new Array(plan.vWrapCols).fill(0);
-    for (let i = 1; i < plan.vWrapCols; i++) {
-      vWrapX[i] = vWrapX[i - 1] + vWrapWidths[i - 1] + gap;
+
+    // Prefix sums for horizontal columns (column right/left edges)
+    const hPrefix = new Array(cols).fill(0);
+    for (let i = 1; i < cols; i++) {
+      hPrefix[i] = hPrefix[i - 1] + hColW[i - 1] + gap;
+    }
+
+    // Prefix sums for vertical wrap columns (beyond wrapCol 0)
+    const vPrefix = new Array(vWrapCols).fill(0);
+    for (let i = 1; i < vWrapCols; i++) {
+      vPrefix[i] = vPrefix[i - 1] + vWrapW[i - 1] + gap;
     }
 
     const positions = {};
 
-    // Base at 0,0
-    if (plan.baseKey) positions[plan.baseKey] = { x: 0, y: 0 };
+    // Base position: in right-aligned mode, anchor by right edge => left = -baseW
+    positions[plan.baseKey] = isRight ? { x: -baseW, y: 0 } : { x: 0, y: 0 };
 
-    // Horizontal positions: col determines x by colX, row determines y
+    // Horizontal positions
     for (const s of plan.slots) {
       if (s.area !== "h") continue;
-      const x = dir * colX[s.col];
+
+      const w = widthByKey[s.key] ?? c.button_size;
+      const colIdx = s.col - 1;
       const y = -s.row * stepY;
-      positions[s.key] = { x, y };
+
+      if (isRight) {
+        // right edge of this column:
+        const rightEdge = -(baseW + gap + (hPrefix[colIdx] || 0));
+        const x = rightEdge - w; // align right edge
+        positions[s.key] = { x, y };
+      } else {
+        const leftEdge = baseW + gap + (hPrefix[colIdx] || 0);
+        const x = leftEdge; // align left edge
+        positions[s.key] = { x, y };
+      }
     }
 
-    // Vertical positions: wrapCol 0 at x=0; wrapCol>0 placed beyond horizontal block
+    // Vertical positions
     for (const s of plan.slots) {
       if (s.area !== "v") continue;
-      let x = 0;
-      if (s.wrapCol === 0) x = 0;
-      else {
-        x = dir * (hBlockWidth + gap + vWrapX[s.wrapCol]);
-      }
+
+      const w = widthByKey[s.key] ?? c.button_size;
       const y = -s.row * stepY;
-      positions[s.key] = { x, y };
+
+      if (isRight) {
+        if (s.wrapCol === 0) {
+          // align to base right edge
+          positions[s.key] = { x: -w, y };
+        } else {
+          // beyond horizontal block: start from leftmost edge of horizontal span
+          const rightEdge = -(hSpan + gap + (vPrefix[s.wrapCol] || 0));
+          const x = rightEdge - w;
+          positions[s.key] = { x, y };
+        }
+      } else {
+        if (s.wrapCol === 0) {
+          positions[s.key] = { x: 0, y };
+        } else {
+          const leftEdge = hSpan + gap + (vPrefix[s.wrapCol] || 0);
+          positions[s.key] = { x: leftEdge, y };
+        }
+      }
     }
 
-    // Update layout if changed
-    this._layout = { ready: true, slots: positions };
+    this._layout = {
+      ready: true,
+      slots: positions,
+      meta: { baseW, hSpan, isRight },
+    };
     this.requestUpdate();
   }
 
@@ -1146,8 +1130,6 @@ class HkiNavigationCard extends LitElement {
     const cols = Math.max(1, c.horizontal.columns);
     const rows = Math.max(1, c.vertical.rows);
 
-    // Horizontal grid: base occupies col 0 row 0
-    // Horizontal buttons occupy col 1..cols, wrap row++
     for (let i = 0; i < hButtons.length; i++) {
       const row = Math.floor(i / cols);
       const col = 1 + (i % cols);
@@ -1155,10 +1137,6 @@ class HkiNavigationCard extends LitElement {
       slots.push({ area: "h", key, row, col });
     }
 
-    const hColsTotal = 1 + cols; // base col + configured cols
-
-    // Vertical grid: first column (wrapCol 0) above base (row 1..rows)
-    // wrapCol>0 shifts right/left beyond horizontal block
     let vWrapCols = 0;
     for (let j = 0; j < vButtons.length; j++) {
       const r = 1 + (j % rows);
@@ -1168,10 +1146,10 @@ class HkiNavigationCard extends LitElement {
       slots.push({ area: "v", key, row: r, wrapCol });
     }
 
-    return { baseKey, slots, hColsTotal, vWrapCols };
+    return { baseKey, slots, vWrapCols };
   }
 
-  /* -------------------------- Actions (tap/dbl/hold) -------------------------- */
+  /* -------------------------- Actions -------------------------- */
 
   _handleAction(btn, which) {
     const hass = this.hass;
@@ -1235,8 +1213,6 @@ class HkiNavigationCard extends LitElement {
         const raw = safeString(action.service_data || "");
         data = raw.trim() ? parseYamlLite(raw) : {};
       } catch (err) {
-        // runtime: do not crash; just call without data
-        // eslint-disable-next-line no-console
         console.warn("[HKI Navigation Card] Service data YAML parse failed:", err);
         data = {};
       }
@@ -1251,11 +1227,9 @@ class HkiNavigationCard extends LitElement {
 
   _onPointerDown(e, btn) {
     e.stopPropagation();
-    // right click handled by contextmenu
     if (e.button === 2) return;
 
     const key = `${btn.id}:${e.pointerId}`;
-    // hold
     const t = setTimeout(() => {
       this._holdTimers.delete(key);
       this._handleAction(btn, "hold_action");
@@ -1273,14 +1247,12 @@ class HkiNavigationCard extends LitElement {
       clearTimeout(holdTimer);
       this._holdTimers.delete(key);
     } else {
-      // hold already fired
       return;
     }
 
     const now = Date.now();
     const dblWindow = 280;
 
-    // double-tap detection
     if (this._tapState.lastId === btn.id && (now - this._tapState.lastTime) < dblWindow) {
       if (this._tapState.singleTimer) clearTimeout(this._tapState.singleTimer);
       this._tapState = { lastId: null, lastTime: 0, singleTimer: null };
@@ -1288,7 +1260,6 @@ class HkiNavigationCard extends LitElement {
       return;
     }
 
-    // schedule single tap to allow double
     if (this._tapState.singleTimer) clearTimeout(this._tapState.singleTimer);
 
     this._tapState.lastId = btn.id;
@@ -1309,7 +1280,6 @@ class HkiNavigationCard extends LitElement {
   _onContextMenu(e, btn) {
     e.preventDefault();
     e.stopPropagation();
-    // treat as hold
     this._handleAction(btn, "hold_action");
   }
 
@@ -1319,8 +1289,7 @@ class HkiNavigationCard extends LitElement {
     return type === "pill" || type === "pill_label";
   }
 
-  _renderButton(btn, context = "h") {
-    const c = this._config;
+  _renderButton(btn) {
     const type = this._getButtonType(btn);
 
     const labelText = this._getLabelText(btn);
@@ -1343,10 +1312,12 @@ class HkiNavigationCard extends LitElement {
     const bg = this._buttonBg(btn);
     const iconColor = this._buttonIconColor(btn);
 
-    const act = btn?.tap_action?.action;
+    // FORCE icon for Back tap action regardless of user choice (your request)
+    const isBackTap = (btn?.tap_action?.action === "back");
     const icon =
+      isBackTap ? "mdi:chevron-left" :
       (btn.icon && btn.icon.trim()) ? btn.icon :
-      (act === "back" ? "mdi:chevron-left" : "mdi:circle");
+      "mdi:circle";
 
     const pillWidth = isPill ? this._getPillWidth(btn) : 0;
     const pillFixed = isPill && pillWidth > 0;
@@ -1354,13 +1325,11 @@ class HkiNavigationCard extends LitElement {
     const btnStyleParts = [`background:${bg}`, `color:${iconColor}`];
     if (pillFixed) btnStyleParts.push(`width:${pillWidth}px`);
 
-    // IMPORTANT: left/right labels must not shift button position.
-    // We render them as floating bubbles around the button.
     const floatGap = 10;
     const floatSide = showBubbleLeft ? "left" : (showBubbleRight ? "right" : null);
 
     return html`
-      <div class="item ${showBubbleBelow ? "item-v" : "item-float"}" data-context=${context}>
+      <div class="item ${showBubbleBelow ? "item-v" : "item-float"}">
         <div class="float-wrap">
           <button
             class="fab ${isPill ? "fab-pill" : ""} ${pillFixed ? "pill-fixed" : ""}"
@@ -1372,13 +1341,8 @@ class HkiNavigationCard extends LitElement {
             @pointercancel=${(e) => this._onPointerCancel(e, btn)}
             @contextmenu=${(e) => this._onContextMenu(e, btn)}
           >
-            ${showIcon
-              ? html`<ha-icon class="fab-icon" .icon=${icon}></ha-icon>`
-              : html``}
-
-            ${showPillText
-              ? html`<span class="pill-text" style="${this._pillTextStyle(btn)}">${labelText}</span>`
-              : html``}
+            ${showIcon ? html`<ha-icon class="fab-icon" .icon=${icon}></ha-icon>` : html``}
+            ${showPillText ? html`<span class="pill-text" style="${this._pillTextStyle(btn)}">${labelText}</span>` : html``}
           </button>
 
           ${floatSide === "left"
@@ -1389,9 +1353,7 @@ class HkiNavigationCard extends LitElement {
             : html``}
         </div>
 
-        ${showBubbleBelow
-          ? html`<div class="label" style="${this._labelBubbleStyle(btn)}">${labelText}</div>`
-          : html``}
+        ${showBubbleBelow ? html`<div class="label" style="${this._labelBubbleStyle(btn)}">${labelText}</div>` : html``}
       </div>
     `;
   }
@@ -1412,85 +1374,63 @@ class HkiNavigationCard extends LitElement {
       return `right:${offsetX}px; bottom:${offsetY}px;`;
     })();
 
-    const baseBtn = c.base?.button;
-    // base always shown
-    const base = baseBtn;
+    const base = c.base?.button;
 
-    // Center mode: vertical always hidden
     if (c.position === "bottom-center") {
       const horizontalVisible = this._isGroupVisible("horizontal");
-      const hButtons = horizontalVisible
-        ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b))
-        : [];
-
+      const hButtons = horizontalVisible ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
       const all = [base, ...hButtons];
 
       const justify = c.center_spread ? "space-between" : "center";
       const pad = c.center_spread ? `${offsetX}px` : "0px";
 
       return html`
-        <div
-          class="fab-anchor"
-          style="${anchorStyle} z-index:${c.z_index}; --hki-size:${c.button_size}px; --hki-gap:${c.gap}px;"
-        >
+        <div class="fab-anchor" style="${anchorStyle} z-index:${c.z_index}; --hki-size:${c.button_size}px; --hki-gap:${c.gap}px;">
           <div class="center-wrap" style="padding:0 ${pad}; justify-content:${justify};">
-            ${all.map((btn) => this._renderButton(btn, "center"))}
+            ${all.map((btn) => this._renderButton(btn))}
           </div>
         </div>
       `;
     }
 
-    // Corner mode: absolute slots + measured positions
     const plan = this._cornerSlotPlan();
+
     const horizontalVisible = this._isGroupVisible("horizontal");
     const verticalVisible = this._isGroupVisible("vertical");
 
-    const hButtons = horizontalVisible
-      ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b))
-      : [];
-    const vButtons = verticalVisible
-      ? (c.vertical.buttons || []).filter((b) => this._isButtonVisible(b))
-      : [];
+    const hButtons = horizontalVisible ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
+    const vButtons = verticalVisible ? (c.vertical.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
 
     const slots = [];
     const baseKey = `base:${base.id}`;
-    slots.push({ key: baseKey, btn: base, area: "base", row: 0, col: 0, wrapCol: 0 });
+    slots.push({ key: baseKey, btn: base, area: "base" });
 
-    // Horizontal slots
     const cols = Math.max(1, c.horizontal.columns);
     for (let i = 0; i < hButtons.length; i++) {
-      const row = Math.floor(i / cols);
-      const col = 1 + (i % cols);
-      slots.push({ key: `h:${hButtons[i].id}`, btn: hButtons[i], area: "h", row, col, wrapCol: 0 });
+      slots.push({ key: `h:${hButtons[i].id}`, btn: hButtons[i], area: "h" });
     }
 
-    // Vertical slots
-    const rows = Math.max(1, c.vertical.rows);
     for (let j = 0; j < vButtons.length; j++) {
-      const row = 1 + (j % rows);
-      const wrapCol = Math.floor(j / rows);
-      slots.push({ key: `v:${vButtons[j].id}`, btn: vButtons[j], area: "v", row, col: 0, wrapCol });
+      slots.push({ key: `v:${vButtons[j].id}`, btn: vButtons[j], area: "v" });
     }
 
-    const gap = c.gap;
-    const fallbackStep = c.button_size + gap;
+    const fallbackStep = c.button_size + c.gap;
 
     return html`
-      <div
-        class="fab-anchor"
-        style="${anchorStyle} z-index:${c.z_index}; --hki-size:${c.button_size}px; --hki-gap:${c.gap}px;"
-      >
+      <div class="fab-anchor" style="${anchorStyle} z-index:${c.z_index}; --hki-size:${c.button_size}px; --hki-gap:${c.gap}px;">
         <div class="abs-grid">
           ${slots.map((s) => {
             const pos = this._layout?.slots?.[s.key];
-            const tx = pos ? pos.x : (c.position === "bottom-right" ? -1 : 1) * (s.col * fallbackStep);
-            const ty = pos ? pos.y : (-s.row * fallbackStep);
+            const tx = pos ? pos.x : 0;
+            const ty = pos ? pos.y : 0;
 
-            const ctx = s.area === "v" ? "v" : (s.area === "h" ? "h" : "base");
+            // Fallback position (rarely seen; layout normally measured)
+            const fallback = (!pos);
+            const style = fallback ? `transform: translate(0px,0px);` : `transform: translate(${tx}px, ${ty}px);`;
 
             return html`
-              <div class="abs-slot" data-slot-id="${s.key}" style="transform: translate(${tx}px, ${ty}px);">
-                ${this._renderButton(s.btn, ctx)}
+              <div class="abs-slot" data-slot-id="${s.key}" style="${style}">
+                ${this._renderButton(s.btn)}
               </div>
             `;
           })}
@@ -1600,7 +1540,7 @@ class HkiNavigationCard extends LitElement {
 
       .fab-pill {
         width: auto;
-        min-width: var(--hki-size);
+        min-width: max(var(--hki-size), ${MIN_PILL_WIDTH}px);
         padding: 0 calc(var(--hki-size) * 0.32);
         gap: calc(var(--hki-size) * 0.14);
         justify-content: center;
@@ -1609,6 +1549,7 @@ class HkiNavigationCard extends LitElement {
 
       .pill-fixed {
         padding: 0 calc(var(--hki-size) * 0.24);
+        min-width: ${MIN_PILL_WIDTH}px;
       }
 
       .pill-text {
@@ -1645,7 +1586,6 @@ class HkiNavigationCardEditor extends LitElement {
       _config: { state: true },
       _expanded: { state: true },
       _yamlErrors: { state: true },
-      _demo: { state: true },
     };
   }
 
@@ -1653,7 +1593,6 @@ class HkiNavigationCardEditor extends LitElement {
     super();
     this._expanded = {};
     this._yamlErrors = {};
-    this._demo = false;
   }
 
   setConfig(config) {
@@ -1667,34 +1606,6 @@ class HkiNavigationCardEditor extends LitElement {
   _emit(cfg) {
     this._config = cfg;
     fireEvent(this, "config-changed", { config: cfg });
-  }
-
-  _anyButtonHasOverride(keyPath) {
-    const c = this._c;
-    const all = [
-      ...(c.horizontal.buttons || []),
-      ...(c.vertical.buttons || []),
-      c.base?.button,
-    ].filter(Boolean);
-
-    const get = (btn) => {
-      if (keyPath.startsWith("label_style.")) {
-        const k = keyPath.split(".")[1];
-        return btn.label_style?.[k];
-      }
-      if (keyPath === "pill_width") return btn.pill_width;
-      if (keyPath === "background") return btn.background;
-      if (keyPath === "background_opacity") return btn.background_opacity;
-      if (keyPath === "icon_color") return btn.icon_color;
-      return undefined;
-    };
-
-    return all.some((b) => {
-      const v = get(b);
-      if (v === undefined || v === null) return false;
-      if (typeof v === "string") return v.trim() !== "";
-      return true;
-    });
   }
 
   _clearOverridesEverywhere(keyPath) {
@@ -1730,33 +1641,25 @@ class HkiNavigationCardEditor extends LitElement {
 
     cfg.horizontal.buttons = (cfg.horizontal.buttons || []).map(clearOnBtn);
     cfg.vertical.buttons = (cfg.vertical.buttons || []).map(clearOnBtn);
-
-    // base included (even though it has no conditions; can still have label overrides)
     cfg.base.button = clearOnBtn(cfg.base.button);
 
     this._emit(cfg);
   }
 
-  _maybeAskOverrideAndApply(keyPath, applyFn) {
-    const has = this._anyButtonHasOverride(keyPath);
-    applyFn();
-    if (!has) return;
-
-    const ok = window.confirm(
-      "You changed a global setting.\n\nDo you want to clear per-button overrides for this setting so all buttons inherit the new global value?"
+  // ALWAYS prompt when a global setting changes:
+  // OK -> clear per-button overrides so existing buttons inherit new global
+  // Cancel -> only apply globally (existing per-button overrides remain)
+  _applyGlobalChangeWithPrompt(keyPath, applyFn) {
+    const override = window.confirm(
+      "Apply this global change to ALL existing buttons?\n\nOK = Override existing per-button settings\nCancel = Only apply to new buttons / inherited buttons"
     );
-    if (ok) this._clearOverridesEverywhere(keyPath);
+    applyFn();
+    if (override) this._clearOverridesEverywhere(keyPath);
   }
 
   _setValue(key, value) {
     const cfg = deepClone(this._c);
     cfg[key] = value;
-    this._emit(cfg);
-  }
-
-  _setNum(key, value) {
-    const cfg = deepClone(this._c);
-    cfg[key] = Number(value);
     this._emit(cfg);
   }
 
@@ -1770,7 +1673,7 @@ class HkiNavigationCardEditor extends LitElement {
   }
 
   _setLabelStyleGlobal(key, value) {
-    this._maybeAskOverrideAndApply(`label_style.${key}`, () => {
+    this._applyGlobalChangeWithPrompt(`label_style.${key}`, () => {
       const cfg = deepClone(this._c);
       cfg.label_style = cfg.label_style || {};
       cfg.label_style[key] = value;
@@ -1779,7 +1682,7 @@ class HkiNavigationCardEditor extends LitElement {
   }
 
   _setDefaultBackground(value) {
-    this._maybeAskOverrideAndApply("background", () => {
+    this._applyGlobalChangeWithPrompt("background", () => {
       const cfg = deepClone(this._c);
       cfg.default_background = value;
       this._emit(cfg);
@@ -1787,7 +1690,7 @@ class HkiNavigationCardEditor extends LitElement {
   }
 
   _setDefaultIconColor(value) {
-    this._maybeAskOverrideAndApply("icon_color", () => {
+    this._applyGlobalChangeWithPrompt("icon_color", () => {
       const cfg = deepClone(this._c);
       cfg.default_icon_color = value;
       this._emit(cfg);
@@ -1795,7 +1698,7 @@ class HkiNavigationCardEditor extends LitElement {
   }
 
   _setDefaultButtonOpacity(value) {
-    this._maybeAskOverrideAndApply("background_opacity", () => {
+    this._applyGlobalChangeWithPrompt("background_opacity", () => {
       const cfg = deepClone(this._c);
       cfg.default_button_opacity = Math.max(0, Math.min(1, Number(value)));
       this._emit(cfg);
@@ -1803,9 +1706,10 @@ class HkiNavigationCardEditor extends LitElement {
   }
 
   _setGlobalPillWidth(value) {
-    this._maybeAskOverrideAndApply("pill_width", () => {
+    this._applyGlobalChangeWithPrompt("pill_width", () => {
       const cfg = deepClone(this._c);
-      cfg.pill_width = Number(value);
+      const n = Number(value);
+      cfg.pill_width = n <= 0 ? 0 : Math.max(MIN_PILL_WIDTH, n);
       this._emit(cfg);
     });
   }
@@ -1928,15 +1832,24 @@ class HkiNavigationCardEditor extends LitElement {
     `;
   }
 
-  _autoSetBackIcon(btn, setBtnFn) {
-    const tap = btn?.tap_action?.action;
-    if (tap !== "back") return;
+  _injectEntityIdIntoYaml(yaml, entityId) {
+    const e = safeString(entityId).trim();
+    if (!e) return yaml || "";
+    const src = safeString(yaml || "");
+    const lines = src.split("\n");
+    let replaced = false;
 
-    const icon = safeString(btn.icon).trim();
-    // only auto-set if empty or default-ish
-    if (icon === "" || icon === "mdi:circle" || icon === "mdi:home-outline") {
-      setBtnFn({ ...btn, icon: "mdi:chevron-left" });
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*entity_id\s*:/.test(lines[i])) {
+        lines[i] = `entity_id: ${e}`;
+        replaced = true;
+        break;
+      }
     }
+    if (!replaced) {
+      return `entity_id: ${e}\n${src}`.trimEnd();
+    }
+    return lines.join("\n");
   }
 
   _renderActionEditor(btn, setBtnFn, which, title, errorKeyPrefix) {
@@ -1947,16 +1860,13 @@ class HkiNavigationCardEditor extends LitElement {
     const update = (patch) => {
       const current = btn?.[which] || { action: "none" };
       const next = { ...btn, [which]: { ...current, ...patch } };
-      setBtnFn(next);
 
-      // auto icon for back on tap_action
+      // If tap_action becomes back, force icon value in config too (but runtime also forces regardless)
       if (which === "tap_action" && patch.action === "back") {
-        // update icon unless already custom
-        const icon = safeString(next.icon).trim();
-        if (icon === "" || icon === "mdi:circle") {
-          setBtnFn({ ...next, icon: "mdi:chevron-left" });
-        }
+        next.icon = "mdi:chevron-left";
       }
+
+      setBtnFn(next);
     };
 
     return html`
@@ -2037,6 +1947,11 @@ class HkiNavigationCardEditor extends LitElement {
                 @change=${(e) => update({ service: e.target.value })}
               ></ha-textfield>
 
+              ${this._renderEntityPicker("Entity helper (writes entity_id into YAML)", "", (ent) => {
+                const nextYaml = this._injectEntityIdIntoYaml(act.service_data || "", ent);
+                update({ service_data: nextYaml });
+              })}
+
               ${this._renderCodeEditor("Service data (YAML)", act.service_data || "", (v) => {
                 update({ service_data: v });
               }, errorKey)}
@@ -2048,7 +1963,7 @@ class HkiNavigationCardEditor extends LitElement {
           : html``}
 
         ${type === "back"
-          ? html`<div class="hint">Goes back using browser history. (Icon auto-sets to mdi:chevron-left on Tap)</div>`
+          ? html`<div class="hint">Back uses browser history. (Tap action forces icon to mdi:chevron-left.)</div>`
           : html``}
       </div>
     `;
@@ -2189,7 +2104,6 @@ class HkiNavigationCardEditor extends LitElement {
                       placeholder="Jimmy Schings, Alex"
                       @change=${(e) => setCond(cond.id, { users: parseCsv(e.target.value) })}
                     ></ha-textfield>
-                    <div class="hint">Matches the logged-in Home Assistant user’s display name.</div>
                   `
                 : html``}
 
@@ -2201,7 +2115,6 @@ class HkiNavigationCardEditor extends LitElement {
                       placeholder="/lovelace/0, /lovelace/home"
                       @change=${(e) => setCond(cond.id, { views: parseCsv(e.target.value) })}
                     ></ha-textfield>
-                    <div class="hint">Matches the current URL path. Suffix matches also work.</div>
                   `
                 : html``}
 
@@ -2216,7 +2129,6 @@ class HkiNavigationCardEditor extends LitElement {
                       <mwc-list-item value="mobile">Mobile</mwc-list-item>
                       <mwc-list-item value="desktop">Desktop</mwc-list-item>
                     </ha-select>
-                    <div class="hint">Mobile is detected using max-width: 800px.</div>
                   `
                 : html``}
             </div>
@@ -2309,13 +2221,16 @@ class HkiNavigationCardEditor extends LitElement {
             <div class="grid2">
               <ha-textfield
                 type="number"
-                .label=${"Pill width override (px) — blank = inherit global / auto"}
+                .label=${`Pill width override (px) — blank = inherit global / auto (min ${MIN_PILL_WIDTH})`}
                 .value=${btn.pill_width ?? ""}
-                @change=${(e) => setBtnFn({ ...btn, pill_width: e.target.value })}
+                @change=${(e) => {
+                  const v = safeString(e.target.value).trim();
+                  if (!v) return setBtnFn({ ...btn, pill_width: "" });
+                  const n = Math.max(MIN_PILL_WIDTH, Number(v));
+                  setBtnFn({ ...btn, pill_width: String(n) });
+                }}
               ></ha-textfield>
-              <div class="hint">
-                Fixed width prevents pill overlap and keeps buttons aligned. Long labels will truncate.
-              </div>
+              <div class="hint">Fixed width keeps pills aligned and prevents awkward spacing.</div>
             </div>
           `
         : html``}
@@ -2435,7 +2350,7 @@ class HkiNavigationCardEditor extends LitElement {
           </div>
 
           <div class="panel">
-            ${this._renderButtonPanel(btn, setBtn, "base", /* allowConditions */ false)}
+            ${this._renderButtonPanel(btn, setBtn, "base", false)}
           </div>
         </ha-expansion-panel>
       </div>
@@ -2448,8 +2363,7 @@ class HkiNavigationCardEditor extends LitElement {
     const enabled = !!c[gKey].enabled;
     const buttons = this._getButtons(group);
 
-    const centerHidden =
-      c.position === "bottom-center" && group === "vertical";
+    const centerHidden = c.position === "bottom-center" && group === "vertical";
 
     const tip = html`
       <ha-alert alert-type="info">
@@ -2547,10 +2461,7 @@ class HkiNavigationCardEditor extends LitElement {
                   <mwc-icon-button
                     title="Move up"
                     ?disabled=${idx === 0}
-                    @click=${(e) => {
-                      e.stopPropagation();
-                      this._moveButtonById(group, btnId, -1);
-                    }}
+                    @click=${(e) => { e.stopPropagation(); this._moveButtonById(group, btnId, -1); }}
                   >
                     <ha-icon icon="mdi:chevron-up"></ha-icon>
                   </mwc-icon-button>
@@ -2558,20 +2469,14 @@ class HkiNavigationCardEditor extends LitElement {
                   <mwc-icon-button
                     title="Move down"
                     ?disabled=${idx === buttons.length - 1}
-                    @click=${(e) => {
-                      e.stopPropagation();
-                      this._moveButtonById(group, btnId, 1);
-                    }}
+                    @click=${(e) => { e.stopPropagation(); this._moveButtonById(group, btnId, 1); }}
                   >
                     <ha-icon icon="mdi:chevron-down"></ha-icon>
                   </mwc-icon-button>
 
                   <mwc-icon-button
                     title="Delete"
-                    @click=${(e) => {
-                      e.stopPropagation();
-                      this._removeButtonById(group, btnId);
-                    }}
+                    @click=${(e) => { e.stopPropagation(); this._removeButtonById(group, btnId); }}
                   >
                     <ha-icon icon="mdi:trash-can-outline"></ha-icon>
                   </mwc-icon-button>
@@ -2584,64 +2489,6 @@ class HkiNavigationCardEditor extends LitElement {
             </ha-expansion-panel>
           `;
         })}
-      </div>
-    `;
-  }
-
-  _renderDemoPreview() {
-    if (!this._demo) return html``;
-
-    const c = this._c;
-    const base = c.base.button;
-    const h = (c.horizontal.buttons || []).slice(0, 5);
-    const v = (c.vertical.buttons || []).slice(0, 5);
-
-    const pos = c.position;
-    const center = pos === "bottom-center";
-    const showV = !center;
-
-    const label = `Preview (${pos}${center && c.center_spread ? ", spread" : ""})`;
-
-    // Minimal preview (not interactive)
-    const size = Math.max(36, clampNum(c.button_size, 50));
-    const gap = Math.max(0, clampNum(c.gap, 12));
-
-    return html`
-      <div class="section">
-        <div class="section-title">${label}</div>
-        <div class="preview-stage" style="--psize:${size}px; --pgap:${gap}px;">
-          <div class="preview-anchor ${pos} ${center && c.center_spread ? "spread" : ""}">
-            <div class="preview-row">
-              ${this._previewBtn(base)}
-              ${h.map((b) => this._previewBtn(b))}
-            </div>
-            ${showV ? html`
-              <div class="preview-col">
-                ${v.map((b) => this._previewBtn(b))}
-              </div>
-            ` : html``}
-          </div>
-        </div>
-        <div class="hint">This is a visual preview only (not clickable).</div>
-      </div>
-    `;
-  }
-
-  _previewBtn(btn) {
-    const type = btn.button_type || this._c.default_button_type;
-    const isPill = type === "pill" || type === "pill_label";
-    const bg = btn.background || this._c.default_background || "var(--accent-color, var(--primary-color))";
-    const opacity = _hasMeaningfulNumber(btn.background_opacity) ? clamp01(_toNumber(btn.background_opacity)) : clamp01(this._c.default_button_opacity);
-    const bg2 = applyBgOpacity(bg, opacity);
-    const color = btn.icon_color || this._c.default_icon_color || "var(--text-primary-color, var(--primary-text-color))";
-
-    const icon = safeString(btn.icon).trim() || "mdi:circle";
-    const label = btn.label || btn.tooltip || "";
-
-    return html`
-      <div class="pbtn ${isPill ? "pill" : ""}" style="background:${bg2}; color:${color};">
-        <ha-icon class="picon" .icon=${icon}></ha-icon>
-        ${isPill && label ? html`<span class="plabel">${label}</span>` : html``}
       </div>
     `;
   }
@@ -2668,19 +2515,6 @@ class HkiNavigationCardEditor extends LitElement {
         </ha-alert>
 
         <div class="section">
-          <div class="section-title row">
-            <span>Editor</span>
-            <ha-formfield .label=${"Demo mode (preview)"}>
-              <ha-switch
-                .checked=${!!this._demo}
-                @change=${(e) => { this._demo = e.target.checked; }}
-              ></ha-switch>
-            </ha-formfield>
-          </div>
-          ${this._renderDemoPreview()}
-        </div>
-
-        <div class="section">
           <div class="section-title">Layout</div>
 
           <div class="grid2">
@@ -2695,40 +2529,20 @@ class HkiNavigationCardEditor extends LitElement {
               <mwc-list-item value="bottom-right">Bottom right</mwc-list-item>
             </ha-select>
 
-            <ha-textfield
-              type="number"
-              .label=${"Offset X (px)"}
-              .value=${String(c.offset_x)}
-              @change=${(e) => this._setValue("offset_x", Number(e.target.value))}
-            ></ha-textfield>
+            <ha-textfield type="number" .label=${"Offset X (px)"} .value=${String(c.offset_x)}
+              @change=${(e) => this._setValue("offset_x", Number(e.target.value))}></ha-textfield>
 
-            <ha-textfield
-              type="number"
-              .label=${"Offset Y (px)"}
-              .value=${String(c.offset_y)}
-              @change=${(e) => this._setValue("offset_y", Number(e.target.value))}
-            ></ha-textfield>
+            <ha-textfield type="number" .label=${"Offset Y (px)"} .value=${String(c.offset_y)}
+              @change=${(e) => this._setValue("offset_y", Number(e.target.value))}></ha-textfield>
 
-            <ha-textfield
-              type="number"
-              .label=${"Button size (px)"}
-              .value=${String(c.button_size)}
-              @change=${(e) => this._setValue("button_size", Number(e.target.value))}
-            ></ha-textfield>
+            <ha-textfield type="number" .label=${"Button size (px)"} .value=${String(c.button_size)}
+              @change=${(e) => this._setValue("button_size", Number(e.target.value))}></ha-textfield>
 
-            <ha-textfield
-              type="number"
-              .label=${"Gap (px)"}
-              .value=${String(c.gap)}
-              @change=${(e) => this._setValue("gap", Number(e.target.value))}
-            ></ha-textfield>
+            <ha-textfield type="number" .label=${"Gap (px)"} .value=${String(c.gap)}
+              @change=${(e) => this._setValue("gap", Number(e.target.value))}></ha-textfield>
 
-            <ha-textfield
-              type="number"
-              .label=${"Z-index"}
-              .value=${String(c.z_index)}
-              @change=${(e) => this._setValue("z_index", Number(e.target.value))}
-            ></ha-textfield>
+            <ha-textfield type="number" .label=${"Z-index"} .value=${String(c.z_index)}
+              @change=${(e) => this._setValue("z_index", Number(e.target.value))}></ha-textfield>
           </div>
 
           ${showCenterOptions
@@ -2765,42 +2579,24 @@ class HkiNavigationCardEditor extends LitElement {
 
               ${c.sidebar_offset_mode === "manual" && c.position === "bottom-left"
                 ? html`
-                    <ha-textfield
-                      type="number"
-                      .label=${"Offset X when sidebar closed"}
-                      .value=${String(c.offset_x_sidebar_closed_left)}
-                      @change=${(e) => this._setValue("offset_x_sidebar_closed_left", Number(e.target.value))}
-                    ></ha-textfield>
-
-                    <ha-textfield
-                      type="number"
-                      .label=${"Offset X when sidebar open"}
-                      .value=${String(c.offset_x_sidebar_open_left)}
-                      @change=${(e) => this._setValue("offset_x_sidebar_open_left", Number(e.target.value))}
-                    ></ha-textfield>
+                    <ha-textfield type="number" .label=${"Offset X when sidebar closed"} .value=${String(c.offset_x_sidebar_closed_left)}
+                      @change=${(e) => this._setValue("offset_x_sidebar_closed_left", Number(e.target.value))}></ha-textfield>
+                    <ha-textfield type="number" .label=${"Offset X when sidebar open"} .value=${String(c.offset_x_sidebar_open_left)}
+                      @change=${(e) => this._setValue("offset_x_sidebar_open_left", Number(e.target.value))}></ha-textfield>
                   `
                 : html``}
 
               ${c.sidebar_offset_mode === "manual" && c.position === "bottom-right"
                 ? html`
-                    <ha-textfield
-                      type="number"
-                      .label=${"Offset X when sidebar closed"}
-                      .value=${String(c.offset_x_sidebar_closed)}
-                      @change=${(e) => this._setValue("offset_x_sidebar_closed", Number(e.target.value))}
-                    ></ha-textfield>
-
-                    <ha-textfield
-                      type="number"
-                      .label=${"Offset X when sidebar open"}
-                      .value=${String(c.offset_x_sidebar_open)}
-                      @change=${(e) => this._setValue("offset_x_sidebar_open", Number(e.target.value))}
-                    ></ha-textfield>
+                    <ha-textfield type="number" .label=${"Offset X when sidebar closed"} .value=${String(c.offset_x_sidebar_closed)}
+                      @change=${(e) => this._setValue("offset_x_sidebar_closed", Number(e.target.value))}></ha-textfield>
+                    <ha-textfield type="number" .label=${"Offset X when sidebar open"} .value=${String(c.offset_x_sidebar_open)}
+                      @change=${(e) => this._setValue("offset_x_sidebar_open", Number(e.target.value))}></ha-textfield>
                   `
                 : html``}
 
               ${c.sidebar_offset_mode === "auto"
-                ? html`<div class="hint">Auto shifts Bottom-left buttons away from the sidebar when it’s open.</div>`
+                ? html`<div class="hint">Auto shifts Bottom-left buttons away from the expanded sidebar.</div>`
                 : html``}
             </div>
           </div>
@@ -2821,7 +2617,7 @@ class HkiNavigationCardEditor extends LitElement {
                 ? html`
                     <ha-textfield
                       type="number"
-                      .label=${"Global pill width (px) — 0 = auto"}
+                      .label=${`Global pill width (px) — 0 = auto (min ${MIN_PILL_WIDTH})`}
                       .value=${String(c.pill_width || 0)}
                       @change=${(e) => this._setGlobalPillWidth(Number(e.target.value))}
                     ></ha-textfield>
@@ -2854,12 +2650,8 @@ class HkiNavigationCardEditor extends LitElement {
           <div class="subsection">
             <div class="subheader">Global label style</div>
             <div class="grid2">
-              <ha-textfield
-                type="number"
-                .label=${"Font size (px)"}
-                .value=${String(c.label_style?.font_size ?? DEFAULT_LABEL_STYLE.font_size)}
-                @change=${(e) => this._setLabelStyleGlobal("font_size", Number(e.target.value))}
-              ></ha-textfield>
+              <ha-textfield type="number" .label=${"Font size (px)"} .value=${String(c.label_style?.font_size ?? DEFAULT_LABEL_STYLE.font_size)}
+                @change=${(e) => this._setLabelStyleGlobal("font_size", Number(e.target.value))}></ha-textfield>
 
               <ha-select
                 .label=${"Font weight"}
@@ -2870,12 +2662,8 @@ class HkiNavigationCardEditor extends LitElement {
                 ${FONT_WEIGHTS.map((fw) => html`<mwc-list-item .value=${String(fw.value)}>${fw.label}</mwc-list-item>`)}
               </ha-select>
 
-              <ha-textfield
-                type="number"
-                .label=${"Letter spacing (px)"}
-                .value=${String(c.label_style?.letter_spacing ?? DEFAULT_LABEL_STYLE.letter_spacing)}
-                @change=${(e) => this._setLabelStyleGlobal("letter_spacing", Number(e.target.value))}
-              ></ha-textfield>
+              <ha-textfield type="number" .label=${"Letter spacing (px)"} .value=${String(c.label_style?.letter_spacing ?? DEFAULT_LABEL_STYLE.letter_spacing)}
+                @change=${(e) => this._setLabelStyleGlobal("letter_spacing", Number(e.target.value))}></ha-textfield>
 
               <ha-select
                 .label=${"Text transform"}
@@ -2889,26 +2677,16 @@ class HkiNavigationCardEditor extends LitElement {
                 <mwc-list-item value="capitalize">Capitalize</mwc-list-item>
               </ha-select>
 
-              <ha-textfield
-                .label=${"Text color (optional)"}
-                .value=${c.label_style?.color ?? ""}
+              <ha-textfield .label=${"Text color (optional)"} .value=${c.label_style?.color ?? ""}
                 placeholder="(blank = theme/currentColor)"
-                @change=${(e) => this._setLabelStyleGlobal("color", e.target.value)}
-              ></ha-textfield>
+                @change=${(e) => this._setLabelStyleGlobal("color", e.target.value)}></ha-textfield>
 
-              <ha-textfield
-                .label=${"Label background (optional)"}
-                .value=${c.label_style?.background ?? ""}
+              <ha-textfield .label=${"Label background (optional)"} .value=${c.label_style?.background ?? ""}
                 placeholder="(blank = theme card rgba)"
-                @change=${(e) => this._setLabelStyleGlobal("background", e.target.value)}
-              ></ha-textfield>
+                @change=${(e) => this._setLabelStyleGlobal("background", e.target.value)}></ha-textfield>
 
-              <ha-textfield
-                type="number"
-                .label=${"Label background opacity"}
-                .value=${String(c.label_style?.background_opacity ?? DEFAULT_LABEL_STYLE.background_opacity)}
-                @change=${(e) => this._setLabelStyleGlobal("background_opacity", Number(e.target.value))}
-              ></ha-textfield>
+              <ha-textfield type="number" .label=${"Label background opacity"} .value=${String(c.label_style?.background_opacity ?? DEFAULT_LABEL_STYLE.background_opacity)}
+                @change=${(e) => this._setLabelStyleGlobal("background_opacity", Number(e.target.value))}></ha-textfield>
             </div>
           </div>
         </div>
@@ -2922,19 +2700,10 @@ class HkiNavigationCardEditor extends LitElement {
 
   static get styles() {
     return css`
-      .editor {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-      }
+      .editor { display: flex; flex-direction: column; gap: 16px; }
 
-      .doc {
-        border-radius: 14px;
-      }
-      .doc-title {
-        font-weight: 800;
-        margin-bottom: 8px;
-      }
+      .doc { border-radius: 14px; }
+      .doc-title { font-weight: 800; margin-bottom: 8px; }
 
       .section {
         padding: 14px;
@@ -2946,31 +2715,12 @@ class HkiNavigationCardEditor extends LitElement {
         gap: 12px;
       }
 
-      .section-title {
-        font-weight: 800;
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        justify-content: space-between;
-      }
+      .section-title { font-weight: 800; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
-      .row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-      }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-      .grid2 {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-      }
-
-      .empty {
-        opacity: 0.7;
-        padding: 8px 2px;
-      }
+      .empty { opacity: 0.7; padding: 8px 2px; }
 
       ha-expansion-panel {
         border-radius: 14px;
@@ -2979,64 +2729,18 @@ class HkiNavigationCardEditor extends LitElement {
         background: rgba(0, 0, 0, 0.06);
       }
 
-      .btn-header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding-right: 8px;
-      }
+      .btn-header { display: flex; align-items: center; gap: 10px; padding-right: 8px; }
+      .btn-header-text { flex: 1; min-width: 0; }
+      .btn-title { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .btn-sub { opacity: 0.75; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .btn-actions { display: flex; align-items: center; gap: 2px; }
 
-      .btn-header-text {
-        flex: 1;
-        min-width: 0;
-      }
+      .panel { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 
-      .btn-title {
-        font-weight: 800;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
+      .subsection { margin-top: 6px; padding-top: 10px; border-top: 1px solid rgba(0, 0, 0, 0.14); display: flex; flex-direction: column; gap: 10px; }
+      .subheader { font-weight: 800; opacity: 0.9; }
 
-      .btn-sub {
-        opacity: 0.75;
-        font-size: 12px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .btn-actions {
-        display: flex;
-        align-items: center;
-        gap: 2px;
-      }
-
-      .panel {
-        padding: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-
-      .subsection {
-        margin-top: 6px;
-        padding-top: 10px;
-        border-top: 1px solid rgba(0, 0, 0, 0.14);
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-
-      .subheader {
-        font-weight: 800;
-        opacity: 0.9;
-      }
-
-      .hint {
-        font-size: 12px;
-        opacity: 0.7;
-      }
+      .hint { font-size: 12px; opacity: 0.7; }
 
       .cond {
         border-radius: 12px;
@@ -3046,98 +2750,15 @@ class HkiNavigationCardEditor extends LitElement {
         flex-direction: column;
         gap: 10px;
       }
+      .cond-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .cond-title { font-weight: 700; font-size: 12px; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-      .cond-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-      }
-
-      .cond-title {
-        font-weight: 700;
-        font-size: 12px;
-        opacity: 0.9;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .code-wrap {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      .code-label {
-        font-weight: 700;
-        opacity: 0.85;
-      }
-      ha-code-editor {
-        border-radius: 12px;
-        overflow: hidden;
-      }
-
-      /* Demo preview */
-      .preview-stage {
-        height: 190px;
-        border-radius: 14px;
-        border: 1px dashed rgba(255,255,255,0.2);
-        background: rgba(0,0,0,0.25);
-        position: relative;
-        overflow: hidden;
-      }
-
-      .preview-anchor {
-        position: absolute;
-        bottom: 16px;
-        pointer-events: none;
-      }
-
-      .preview-anchor.bottom-left { left: 16px; }
-      .preview-anchor.bottom-right { right: 16px; }
-      .preview-anchor.bottom-center { left: 50%; transform: translateX(-50%); }
-      .preview-anchor.bottom-center.spread { left: 16px; right: 16px; transform: none; }
-
-      .preview-row {
-        display: flex;
-        align-items: center;
-        gap: var(--pgap);
-      }
-
-      .preview-col {
-        display: flex;
-        flex-direction: column;
-        gap: var(--pgap);
-        margin-top: var(--pgap);
-      }
-
-      .pbtn {
-        width: var(--psize);
-        height: var(--psize);
-        border-radius: 999px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        padding: 0 12px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-      }
-      .pbtn.pill { width: auto; }
-      .picon {
-        --mdc-icon-size: calc(var(--psize) * 0.48);
-      }
-      .plabel {
-        font-weight: 700;
-        white-space: nowrap;
-        max-width: 160px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
+      .code-wrap { display: flex; flex-direction: column; gap: 8px; }
+      .code-label { font-weight: 700; opacity: 0.85; }
+      ha-code-editor { border-radius: 12px; overflow: hidden; }
 
       @media (max-width: 640px) {
-        .grid2 {
-          grid-template-columns: 1fr;
-        }
+        .grid2 { grid-template-columns: 1fr; }
       }
     `;
   }
@@ -3174,7 +2795,8 @@ HkiNavigationCard.getStubConfig = () => ({
         ...DEFAULT_BUTTON(),
         icon: "mdi:menu",
         tooltip: "Menu",
-        button_type: "icon",
+        button_type: "pill",
+        label: "Menu",
         double_tap_action: { action: "toggle-group", target: "both", mode: "show" },
       },
     ],
@@ -3187,7 +2809,8 @@ HkiNavigationCard.getStubConfig = () => ({
         ...DEFAULT_BUTTON(),
         icon: "mdi:cog",
         tooltip: "Settings",
-        button_type: "icon_label_left",
+        button_type: "pill",
+        label: "Settings",
         tap_action: { action: "navigate", navigation_path: "/config" },
       },
     ],
