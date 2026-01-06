@@ -653,6 +653,27 @@ class HkiNavigationCard extends LitElement {
     this._bottomBarMeasureRaf = null;
     this._bottomBarBounds = null;
 
+    this._uiRecalcRaf = null;
+
+    // Bottom inset (prevents last card being hidden under the fixed bar/buttons)
+    this._bottomInsetTarget = null;
+    this._bottomInsetPrevInline = null;
+    this._bottomInsetBasePx = null;
+
+    // Track transitions (sidebar/drawers often animate)
+    this._onTransitionEnd = (ev) => {
+      try {
+        const c = this._config;
+        if (!c || c.sidebar_offset_mode !== "auto") return;
+        const pn = ev?.propertyName || "";
+        // Only react to layout-relevant transitions
+        if (!pn || /width|left|right|margin|transform|translate/i.test(pn)) {
+          this._bumpUiRecalc(12);
+        }
+      } catch (_) {}
+    };
+
+
     // UI state tracking
     this._sidebarNarrow = true;
     this._sidebarWidth = 0;
@@ -674,18 +695,22 @@ class HkiNavigationCard extends LitElement {
       this.requestUpdate();
       this._scheduleMeasure();
       this._scheduleMeasureBottomBar();
+      this._applyBottomInset();
     };
   }
 
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener("resize", this._onResize);
+    document.body?.addEventListener?.("transitionend", this._onTransitionEnd, true);
     this._refreshUiState(true);
+    this._applyBottomInset();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("resize", this._onResize);
+    document.body?.removeEventListener?.("transitionend", this._onTransitionEnd, true);
 
     for (const o of this._uiObservers) {
       try { o.disconnect(); } catch (_) {}
@@ -700,6 +725,10 @@ class HkiNavigationCard extends LitElement {
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
 
     if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
+
+    if (this._uiRecalcRaf) cancelAnimationFrame(this._uiRecalcRaf);
+
+    this._clearBottomInset();
   }
 
   updated() {
@@ -708,6 +737,7 @@ class HkiNavigationCard extends LitElement {
     this._refreshUiState(false, true);
     this._scheduleMeasure();
     this._scheduleMeasureBottomBar();
+    this._applyBottomInset();
   }
 
   setConfig(config) {
@@ -733,6 +763,8 @@ class HkiNavigationCard extends LitElement {
 
   _scheduleMeasureBottomBar() {
     const c = this._config;
+
+    // If disabled or full-width, we don't need bounds
     if (!c || !c.bottom_bar_enabled || c.bottom_bar_full_width) {
       if (this._bottomBarBounds) {
         this._bottomBarBounds = null;
@@ -741,8 +773,18 @@ class HkiNavigationCard extends LitElement {
       return;
     }
 
+    // Measure for a few frames to catch layout/transition changes (sidebar animations, etc.)
+    const frames = 14;
     if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
-    this._bottomBarMeasureRaf = requestAnimationFrame(() => this._measureBottomBarBounds());
+
+    let n = frames;
+    const step = () => {
+      this._measureBottomBarBounds();
+      n -= 1;
+      if (n > 0) this._bottomBarMeasureRaf = requestAnimationFrame(step);
+    };
+
+    this._bottomBarMeasureRaf = requestAnimationFrame(step);
   }
 
   _measureBottomBarBounds() {
@@ -752,10 +794,8 @@ class HkiNavigationCard extends LitElement {
     const root = this.shadowRoot;
     if (!root) return;
 
-    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-    if (vw <= 0) return;
-
-    const fabs = Array.from(root.querySelectorAll(".fab-anchor .fab"));
+    // Buttons are rendered as <button class="fab ...">
+    const fabs = Array.from(root.querySelectorAll('.fab-anchor button.fab, .fab-anchor .fab'));
     if (!fabs.length) return;
 
     const rects = [];
@@ -767,20 +807,24 @@ class HkiNavigationCard extends LitElement {
     }
     if (!rects.length) return;
 
+    // Find the bottom-most row (tolerant for sub-pixel/layout differences)
     const maxBottom = Math.max(...rects.map((r) => r.bottom));
-    const tol = 2;
-    const bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
+    const tol = 8;
+    const bottomRow = rects.filter((r) => r.bottom >= (maxBottom - tol));
+    if (!bottomRow.length) return;
 
     const minLeft = Math.min(...bottomRow.map((r) => r.left));
     const maxRight = Math.max(...bottomRow.map((r) => r.right));
 
-    const next = {
-      left: Math.max(0, Math.round(minLeft)),
-      right: Math.max(0, Math.round(vw - maxRight)),
-    };
+    // Add a tiny padding so the bar peeks behind the group nicely
+    const pad = 10;
+    const left = Math.max(0, Math.round(minLeft - pad));
+    const width = Math.max(0, Math.round((maxRight - minLeft) + pad * 2));
+
+    const next = { left, width };
 
     const cur = this._bottomBarBounds;
-    const changed = !cur || cur.left !== next.left || cur.right !== next.right;
+    const changed = !cur || cur.left !== next.left || cur.width !== next.width;
     if (changed) {
       this._bottomBarBounds = next;
       this.requestUpdate();
@@ -799,7 +843,7 @@ class HkiNavigationCard extends LitElement {
   }
 
   // Deep query into shadow DOMs
-  _queryDeep(selector, root = document, maxDepth = 12) {
+  _queryDeep(selector, root = document, maxDepth = 25) {
     const results = [];
     const visited = new Set();
 
@@ -851,33 +895,70 @@ class HkiNavigationCard extends LitElement {
 
     const predicate = (_el, rect) => rect.width >= 200 && rect.height >= 200;
 
-    // Prefer actual "view" elements over the outer ha-panel-lovelace container (which may span full width).
-    const preferred = [
+    // Candidates that often represent the *actual* scroll/view container or its inner content.
+    // Some HA layouts keep the outer element full-width, but change padding/margins when the sidebar toggles.
+    const candidates = [
+      ...this._queryDeep("#view"),
+      ...this._queryDeep("#content"),
+      ...this._queryDeep("#contentContainer"),
       ...this._queryDeep("hui-sections-view"),
       ...this._queryDeep("hui-view"),
       ...this._queryDeep("hui-masonry-view"),
+      ...this._queryDeep("ha-panel-lovelace"),
+      ...this._queryDeep("ha-app-layout"),
     ];
 
-    let el = this._findVisibleBest(preferred, predicate);
+    let best = null;
+    let bestScore = -1;
 
-    if (!el) {
-      const fallback = [
-        ...this._queryDeep("ha-panel-lovelace"),
-      ];
-      el = this._findVisibleBest(fallback, predicate);
+    for (const el of candidates) {
+      try {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden") continue;
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        if (predicate && !predicate(el, rect)) continue;
+
+        const padL = parseFloat(style.paddingLeft) || 0;
+        const padR = parseFloat(style.paddingRight) || 0;
+        const marL = parseFloat(style.marginLeft) || 0;
+        const marR = parseFloat(style.marginRight) || 0;
+
+        const insetL = Math.max(0, rect.left + padL + marL);
+        const insetR = Math.max(0, (vw - rect.right) + padR + marR);
+
+        // Prefer large, visible containers, and strongly prefer those with real insets (sidebar/padding).
+        const area = rect.width * rect.height;
+        const insetBonus = (insetL + insetR) * 2000;  // bias toward elements that "move" with sidebar
+        const score = area + insetBonus;
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = el;
+        }
+      } catch (_) {}
     }
 
-    this._contentEl = el || null;
+    this._contentEl = best || null;
 
-    if (!el || vw <= 0) {
+    if (!best || vw <= 0) {
       this._contentLeftMargin = 0;
       this._contentRightMargin = 0;
       return;
     }
 
-    const rect = el.getBoundingClientRect();
-    this._contentLeftMargin = Math.max(0, rect.left);
-    this._contentRightMargin = Math.max(0, vw - rect.right);
+    const rect = best.getBoundingClientRect();
+    const style = window.getComputedStyle(best);
+    const padL = parseFloat(style.paddingLeft) || 0;
+    const padR = parseFloat(style.paddingRight) || 0;
+    const marL = parseFloat(style.marginLeft) || 0;
+    const marR = parseFloat(style.marginRight) || 0;
+
+    const nextL = Math.max(0, rect.left + padL + marL);
+    const nextR = Math.max(0, (vw - rect.right) + padR + marR);
+
+    this._contentLeftMargin = nextL;
+    this._contentRightMargin = nextR;
   }
 
   _refreshUiState(forceRehook = false, softRehook = false) {
@@ -947,6 +1028,9 @@ class HkiNavigationCard extends LitElement {
             this._measureContentMargins();
             this.requestUpdate();
             this._scheduleMeasure();
+            this._scheduleMeasureBottomBar();
+            this._applyBottomInset();
+            this._bumpUiRecalc(10);
           });
           mo.observe(el, { attributes: true, attributeFilter: attrs.length ? attrs : undefined });
           this._uiObservers.push(mo);
@@ -966,6 +1050,9 @@ class HkiNavigationCard extends LitElement {
               this._measureContentMargins();
               this.requestUpdate();
               this._scheduleMeasure();
+              this._scheduleMeasureBottomBar();
+              this._applyBottomInset();
+              this._bumpUiRecalc(10);
             });
             ro.observe(el);
             this._resizeObservers.push(ro);
@@ -1246,32 +1333,43 @@ class HkiNavigationCard extends LitElement {
       : "";
 
     let left = 0;
-    let right = 0;
+    let width = 0;
 
     if (c.bottom_bar_full_width) {
       left = 0;
-      right = 0;
+      width = window.innerWidth || document.documentElement.clientWidth || 0;
+      // Fallback if width is 0 for some reason
+      if (width <= 0) width = 999999;
     } else {
-      // When not spanning full width, draw only behind the bottom-most row of buttons.
-      if (!this._bottomBarBounds) return null;
-      left = this._bottomBarBounds.left;
-      right = this._bottomBarBounds.right;
+      // When not spanning full width, draw behind the bottom-most row of buttons.
+      // If bounds aren't ready yet, fall back to the Lovelace content width so *something* shows.
+      if (this._bottomBarBounds && this._bottomBarBounds.width > 0) {
+        left = this._bottomBarBounds.left;
+        width = this._bottomBarBounds.width;
+      } else {
+        const lm = this._contentLeftMargin || 0;
+        const rm = this._contentRightMargin || 0;
+        left = Math.max(0, Math.round(lm));
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        width = Math.max(0, Math.round(vw - lm - rm));
+        if (width <= 0) return null;
+      }
     }
 
     const styleParts = [
       `left:${left}px`,
-      `right:${right}px`,
+      `width:${width}px`,
       `bottom:${bottom}px`,
       `height:${height}px`,
       `background:${color}`,
       `z-index:${z}`,
       `border-radius:${radius}px`,
-    ];
-    if (shadow) styleParts.push(`box-shadow:${shadow}`);
+      shadow ? `box-shadow:${shadow}` : "",
+      "position:fixed",
+      "pointer-events:none",
+    ].filter(Boolean);
 
-    return html`
-      <div class="bottom-bar" style="${styleParts.join(";")}"></div>
-    `;
+    return html`<div class="bottom-bar" style="${styleParts.join(";")}"></div>`;
   }
 
 
