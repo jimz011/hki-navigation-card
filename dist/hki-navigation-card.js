@@ -424,6 +424,13 @@ const DEFAULTS = {
   offset_x_sidebar_closed_left: 70,
   offset_x_sidebar_open_left: 260,
 
+
+  // Cosmetic bottom bar behind buttons
+  bottom_bar_enabled: false,
+  bottom_bar_height: 72,
+  bottom_bar_color: "rgba(var(--rgb-card-background-color, 0,0,0), 0.85)",
+  // When true, the bar spans the entire viewport width. When false, it spans the Lovelace content width.
+  bottom_bar_full_width: false,
   buttons: undefined,
   default_label_position: undefined,
   default_show_label: undefined,
@@ -532,6 +539,12 @@ function normalizeConfig(cfg) {
   c.vertical_gap = Math.max(0, clampNum(c.vertical_gap, c.gap));
 
   c.z_index = clampNum(c.z_index, DEFAULTS.z_index);
+
+  // Cosmetic bottom bar
+  c.bottom_bar_enabled = !!raw.bottom_bar_enabled;
+  c.bottom_bar_full_width = !!raw.bottom_bar_full_width;
+  c.bottom_bar_height = Math.max(0, clampInt(raw.bottom_bar_height, DEFAULTS.bottom_bar_height, 0));
+  c.bottom_bar_color = (typeof raw.bottom_bar_color === "string") ? raw.bottom_bar_color : DEFAULTS.bottom_bar_color;
 
   c.default_button_opacity = Math.max(0, Math.min(1, clampNum(c.default_button_opacity, DEFAULTS.default_button_opacity)));
 
@@ -755,7 +768,7 @@ class HkiNavigationCard extends LitElement {
   }
 
   _measureContentMargins() {
-    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewW = window.innerWidth || document.documentElement.clientWidth || 0;
 
     const candidates = [
       ...this._queryDeep("hui-sections-view"),
@@ -779,9 +792,21 @@ class HkiNavigationCard extends LitElement {
   }
 
   _refreshUiState(forceRehook = false, softRehook = false) {
-    // Measure sidebar state reliably via ha-sidebar[narrow]
-    const sidebars = this._queryDeep("ha-sidebar");
-    const sb = this._findVisibleBest(sidebars, (_el, rect) => rect.width > 0 && rect.left <= 2);
+    // Measure sidebar state (HA has changed this a few times: ha-sidebar, drawers, etc.)
+    const viewW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const sidebarCandidates = [
+      ...this._queryDeep("ha-sidebar"),
+      ...this._queryDeep("ha-drawer"),
+      ...this._queryDeep("mwc-drawer"),
+      ...this._queryDeep("app-drawer-layout"),
+    ];
+    const sb = this._findVisibleBest(sidebarCandidates, (_el, rect) => {
+      if (rect.width <= 0) return false;
+      const onLeft = rect.left <= 2;
+      // Avoid accidentally matching the right edit drawer
+      const notRightDrawer = viewW <= 0 ? true : rect.right <= viewW * 0.65;
+      return onLeft && notRightDrawer;
+    });
     this._sidebarEl = sb || null;
 
     if (sb) {
@@ -839,8 +864,10 @@ class HkiNavigationCard extends LitElement {
         } catch (_) {}
       };
 
-      observeElAttrs(this._sidebarEl, ["narrow", "expanded", "collapsed", "style", "class"]);
+      observeElAttrs(this._sidebarEl, ["narrow", "expanded", "collapsed", "open", "opened", "style", "class"]);
       observeElAttrs(this._rightPanelEl, ["open", "opened", "style", "class"]);
+      observeElAttrs(document.body, ["class", "style"]);
+      observeElAttrs(this._contentEl, ["style", "class"]);
 
       if (window.ResizeObserver) {
         const hookResize = (el) => {
@@ -1077,7 +1104,12 @@ class HkiNavigationCard extends LitElement {
   _computeOffsetX() {
     const c = this._config;
 
-    const sidebarOpen = !!(this._sidebarEl && !this._sidebarNarrow && this._sidebarWidth > 0);
+    // Best-effort "sidebar open" detection:
+    // - classic ha-sidebar: narrow=false means expanded
+    // - fallback: content left margin > ~90px indicates the content is being pushed by a wide sidebar
+    const sidebarOpen =
+      (!!(this._sidebarEl && !this._sidebarNarrow && this._sidebarWidth > 0)) ||
+      ((this._contentLeftMargin || 0) > 90);
 
     if (c.sidebar_offset_mode === "manual") {
       const open = sidebarOpen;
@@ -1091,18 +1123,44 @@ class HkiNavigationCard extends LitElement {
       return c.offset_x;
     }
 
-    // AUTO mode (works for both overlay + push sidebar layouts)
+    // AUTO mode: anchor to the Lovelace content area (so it follows sidebar push/overlay, panel padding, etc.)
     if (c.position === "bottom-left") {
-      return c.offset_x + (sidebarOpen ? this._sidebarWidth : 0);
+      return c.offset_x + (this._contentLeftMargin || 0);
     }
 
-    // Right side is not covered by the left sidebar in HA; keep it stable.
     if (c.position === "bottom-right") {
-      return c.offset_x;
+      return c.offset_x + (this._contentRightMargin || 0);
     }
 
+    // Bottom-center uses a different positioning strategy; offset_x is used as extra padding (when spread) only.
     return c.offset_x;
   }
+
+
+  _renderBottomBar() {
+    const c = this._config;
+    if (!c?.bottom_bar_enabled) return null;
+
+    const height = Math.max(0, clampInt(c.bottom_bar_height, DEFAULTS.bottom_bar_height, 0));
+    if (height <= 0) return null;
+
+    const color = (typeof c.bottom_bar_color === "string" && c.bottom_bar_color.trim())
+      ? c.bottom_bar_color.trim()
+      : DEFAULTS.bottom_bar_color;
+
+    const z = Math.max(0, (c.z_index || 0) - 1);
+
+    const left = c.bottom_bar_full_width ? 0 : (this._contentLeftMargin || 0);
+    const right = c.bottom_bar_full_width ? 0 : (this._contentRightMargin || 0);
+
+    return html`
+      <div
+        class="bottom-bar"
+        style="left:${left}px; right:${right}px; height:${height}px; background:${color}; z-index:${z};"
+      ></div>
+    `;
+  }
+
 
   /* -------------------------- Dynamic layout measurement -------------------------- */
 
@@ -1481,6 +1539,14 @@ class HkiNavigationCard extends LitElement {
     const anchorStyle = (() => {
       if (c.position === "bottom-center") {
         if (c.center_spread) return `left:0px; right:0px; bottom:${offsetY}px;`;
+
+        // Keep true center aligned to the Lovelace content (accounts for sidebar push + right panels + padding)
+        const lm = this._contentLeftMargin || 0;
+        const rm = this._contentRightMargin || 0;
+        const shift = (lm - rm) / 2;
+        if (Math.abs(shift) > 0.5) {
+          return `left:calc(50% + ${shift}px); transform:translateX(-50%); bottom:${offsetY}px;`;
+        }
         return `left:50%; transform:translateX(-50%); bottom:${offsetY}px;`;
       }
       if (c.position === "bottom-left") return `left:${offsetX}px; bottom:${offsetY}px;`;
@@ -1507,16 +1573,28 @@ class HkiNavigationCard extends LitElement {
     if (c.position === "bottom-center") {
       const horizontalVisible = this._isGroupVisible("horizontal");
       const hButtons = horizontalVisible ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
+
       const all = [base, ...hButtons];
 
+      // Apply the same "columns" logic as the corner layouts (center will wrap into multiple rows)
+      const cols = Math.max(1, clampInt(c.horizontal.columns, DEFAULTS.horizontal.columns, 1));
+      const rows = [];
+      for (let i = 0; i < all.length; i += cols) rows.push(all.slice(i, i + cols));
+
       const justify = c.center_spread ? "space-between" : "center";
-      const pad = c.center_spread ? `${offsetX}px` : "0px";
+      const padLeft = c.center_spread ? `${(this._contentLeftMargin || 0) + offsetX}px` : "0px";
+      const padRight = c.center_spread ? `${(this._contentRightMargin || 0) + offsetX}px` : "0px";
 
       return html`
         ${placeholder}
+        ${this._renderBottomBar()}
         <div class="fab-anchor" style="${anchorStyle} z-index:${c.z_index}; --hki-size:${c.button_size}px; --hki-gap:${c.gap}px;">
-          <div class="center-wrap" style="padding:0 ${pad}; justify-content:${justify};">
-            ${all.map((btn) => this._renderButton(btn))}
+          <div class="center-stack ${c.center_spread ? "spread" : ""}" style="padding:0 ${padRight} 0 ${padLeft}; gap:${c.vertical_gap}px;">
+            ${rows.map((row) => html`
+              <div class="center-row" style="justify-content:${justify};">
+                ${row.map((btn) => this._renderButton(btn))}
+              </div>
+            `)}
           </div>
         </div>
       `;
@@ -1542,6 +1620,7 @@ class HkiNavigationCard extends LitElement {
 
     return html`
       ${placeholder}
+      ${this._renderBottomBar()}
       <div class="fab-anchor" style="${anchorStyle} z-index:${c.z_index}; --hki-size:${c.button_size}px; --hki-gap:${c.gap}px;">
         <div class="abs-grid">
           ${slots.map((s) => {
@@ -1588,6 +1667,12 @@ class HkiNavigationCard extends LitElement {
         pointer-events: none;
       }
 
+      .bottom-bar {
+        position: fixed;
+        bottom: 0;
+        pointer-events: none;
+      }
+
       .abs-grid,
       .abs-slot,
       .item,
@@ -1609,14 +1694,33 @@ class HkiNavigationCard extends LitElement {
         will-change: transform;
       }
 
-      .center-wrap {
+      .center-stack {
+        pointer-events: none;
+        display: flex;
+        flex-direction: column-reverse; /* bottom row stays closest to the bottom */
+        align-items: stretch;
+      }
+
+      .center-row {
         pointer-events: none;
         display: flex;
         align-items: center;
         gap: var(--hki-gap);
       }
 
-      .item {
+.center-row {
+        /* When not spread, keep each row centered */
+        width: fit-content;
+        margin: 0 auto;
+      }
+
+      /* When spread (full width), rows occupy all width */
+      .center-stack.spread .center-row {
+        width: 100%;
+        margin: 0;
+      }
+
+.item {
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1903,6 +2007,46 @@ class HkiNavigationCardEditor extends LitElement {
     `;
   }
 
+
+  _renderNavigationPathPicker(label, value, onChange) {
+    const val = value || "";
+
+    // Prefer the dedicated navigation picker if it exists
+    if (customElements.get("ha-navigation-picker")) {
+      return html`
+        <ha-navigation-picker
+          .hass=${this.hass}
+          .label=${label}
+          .value=${val}
+          @value-changed=${(e) => onChange(e.detail?.value ?? "")}
+        ></ha-navigation-picker>
+      `;
+    }
+
+    // Next best: HA selector (newer versions provide a navigation selector)
+    if (customElements.get("ha-selector")) {
+      return html`
+        <ha-selector
+          .hass=${this.hass}
+          .label=${label}
+          .selector=${{ navigation: {} }}
+          .value=${val}
+          @value-changed=${(e) => onChange(e.detail?.value ?? "")}
+        ></ha-selector>
+      `;
+    }
+
+    // Fallback: plain text field
+    return html`
+      <ha-textfield
+        .label=${label}
+        .value=${val}
+        placeholder="/lovelace/0"
+        @change=${(e) => onChange(e.target.value)}
+      ></ha-textfield>
+    `;
+  }
+
   _renderCodeEditor(label, value, onChange, errorKey) {
     const showError = !!this._yamlErrors[errorKey];
 
@@ -2008,12 +2152,7 @@ class HkiNavigationCardEditor extends LitElement {
 
         ${type === "navigate"
           ? html`
-              <ha-textfield
-                .label=${"Navigation path"}
-                .value=${act.navigation_path || ""}
-                placeholder="/lovelace/0"
-                @change=${(e) => update({ navigation_path: e.target.value })}
-              ></ha-textfield>
+              ${this._renderNavigationPathPicker("Navigation path", act.navigation_path || "", (v) => update({ navigation_path: v }))}
             `
           : html``}
 
@@ -2840,6 +2979,44 @@ class HkiNavigationCardEditor extends LitElement {
                 </div>
               `
             : html``}
+
+          <div class="subsection">
+            <div class="subheader">Bottom bar (cosmetic)</div>
+            <div class="grid2">
+              <ha-formfield .label=${"Enable bottom bar"}>
+                <ha-switch
+                  .checked=${!!c.bottom_bar_enabled}
+                  @change=${(e) => this._setBool("bottom_bar_enabled", e.target.checked)}
+                ></ha-switch>
+              </ha-formfield>
+
+              <ha-formfield .label=${"Span full width"}>
+                <ha-switch
+                  .checked=${!!c.bottom_bar_full_width}
+                  @change=${(e) => this._setBool("bottom_bar_full_width", e.target.checked)}
+                ></ha-switch>
+              </ha-formfield>
+
+              <ha-textfield
+                type="number"
+                .label=${"Bottom bar height (px)"}
+                .value=${String(c.bottom_bar_height)}
+                ?disabled=${!c.bottom_bar_enabled}
+                @change=${(e) => this._setValue("bottom_bar_height", Number(e.target.value))}
+              ></ha-textfield>
+
+              <ha-textfield
+                .label=${"Bottom bar color (CSS)"}
+                .value=${c.bottom_bar_color || ""}
+                ?disabled=${!c.bottom_bar_enabled}
+                @change=${(e) => this._setValue("bottom_bar_color", e.target.value)}
+              ></ha-textfield>
+
+              <div class="hint">
+                Purely visual. It does not change offsets or click behavior—just draws a bar behind the buttons.
+              </div>
+            </div>
+          </div>
 
           <div class="subsection">
             <div class="subheader">Sidebar offset</div>
