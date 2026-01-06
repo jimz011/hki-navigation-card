@@ -1077,29 +1077,30 @@ class HkiNavigationCard extends LitElement {
   _computeOffsetX() {
     const c = this._config;
 
-    // For edit drawer overlays, keep buttons accessible
-    const rightPanelExtra = (this._rightPanelWidth > 0 ? this._rightPanelWidth : 0);
+    const sidebarOpen = !!(this._sidebarEl && !this._sidebarNarrow && this._sidebarWidth > 0);
 
     if (c.sidebar_offset_mode === "manual") {
-      const sidebarOpen = !this._sidebarNarrow;
+      const open = sidebarOpen;
 
       if (c.position === "bottom-left") {
-        return (sidebarOpen ? c.offset_x_sidebar_open_left : c.offset_x_sidebar_closed_left);
+        return open ? c.offset_x_sidebar_open_left : c.offset_x_sidebar_closed_left;
       }
       if (c.position === "bottom-right") {
-        // Apply manual open/closed + keep out of right editor drawer if it exists
-        return (sidebarOpen ? c.offset_x_sidebar_open : c.offset_x_sidebar_closed) + rightPanelExtra;
+        return open ? c.offset_x_sidebar_open : c.offset_x_sidebar_closed;
       }
       return c.offset_x;
     }
 
-    // AUTO: align to the actual view container margins (fixes sidebar open/closed perfectly)
+    // AUTO mode (works for both overlay + push sidebar layouts)
     if (c.position === "bottom-left") {
-      return c.offset_x + (this._contentLeftMargin || 0);
+      return c.offset_x + (sidebarOpen ? this._sidebarWidth : 0);
     }
+
+    // Right side is not covered by the left sidebar in HA; keep it stable.
     if (c.position === "bottom-right") {
-      return c.offset_x + (this._contentRightMargin || 0) + rightPanelExtra;
+      return c.offset_x;
     }
+
     return c.offset_x;
   }
 
@@ -1865,6 +1866,20 @@ class HkiNavigationCardEditor extends LitElement {
   }
 
   _renderEntityPicker(label, value, onChange) {
+    // Prefer HA selector (this matches the exact UI in your screenshot)
+    if (customElements.get("ha-selector")) {
+      return html`
+        <ha-selector
+          .hass=${this.hass}
+          .label=${label}
+          .selector=${{ entity: {} }}
+          .value=${value || ""}
+          @value-changed=${(e) => onChange(e.detail?.value ?? "")}
+        ></ha-selector>
+      `;
+    }
+
+    // Fallback: old picker
     if (customElements.get("ha-entity-picker")) {
       return html`
         <ha-entity-picker
@@ -1872,11 +1887,12 @@ class HkiNavigationCardEditor extends LitElement {
           .label=${label}
           .value=${value || ""}
           allow-custom-entity
-          @value-changed=${(e) => onChange(e.detail?.value ?? e.target?.value ?? "")}
-          @change=${(e) => onChange(e.detail?.value ?? e.target?.value ?? "")}
+          @value-changed=${(e) => onChange(e.detail?.value ?? "")}
         ></ha-entity-picker>
       `;
     }
+
+    // Last fallback
     return html`
       <ha-textfield
         .label=${label}
@@ -1906,6 +1922,26 @@ class HkiNavigationCardEditor extends LitElement {
       this.requestUpdate();
     };
 
+    // Best: HA YAML editor (this is what gives entity autocomplete inside YAML)
+    if (customElements.get("ha-yaml-editor")) {
+      return html`
+        <div class="code-wrap">
+          <div class="code-label">${label}</div>
+          <ha-yaml-editor
+            .hass=${this.hass}
+            .value=${value || ""}
+            @value-changed=${(e) => {
+              const v = e.detail?.value ?? "";
+              onChange(v);
+              validate(v);
+            }}
+          ></ha-yaml-editor>
+          ${showError ? html`<ha-alert alert-type="error">YAML error: ${this._yamlErrors[errorKey]}</ha-alert>` : html``}
+        </div>
+      `;
+    }
+
+    // Next best: code editor
     if (customElements.get("ha-code-editor")) {
       return html`
         <div class="code-wrap">
@@ -1915,7 +1951,7 @@ class HkiNavigationCardEditor extends LitElement {
             .mode=${"yaml"}
             .value=${value || ""}
             @value-changed=${(e) => {
-              const v = e.detail?.value ?? e.target?.value ?? "";
+              const v = e.detail?.value ?? "";
               onChange(v);
               validate(v);
             }}
@@ -1925,6 +1961,7 @@ class HkiNavigationCardEditor extends LitElement {
       `;
     }
 
+    // Fallback
     return html`
       <ha-textarea
         .label=${label}
@@ -2750,8 +2787,6 @@ class HkiNavigationCardEditor extends LitElement {
             This card may contain bugs. Use at your own risk!
           </div>
         </ha-alert>
-
-        ${this._renderPreview()}
 
         <div class="section">
           <div class="section-title">Layout</div>
