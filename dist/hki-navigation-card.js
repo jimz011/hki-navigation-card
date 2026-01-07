@@ -737,11 +737,59 @@ class HkiNavigationCard extends LitElement {
   }
 
   _scheduleMeasureBottomBar() {
-    // No longer needed - bar position calculated directly
+    const c = this._config;
+    if (!c || !c.bottom_bar_enabled || c.bottom_bar_full_width) {
+      if (this._bottomBarBounds) {
+        this._bottomBarBounds = null;
+        this.requestUpdate();
+      }
+      return;
+    }
+
+    if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
+    this._bottomBarMeasureRaf = requestAnimationFrame(() => this._measureBottomBarBounds());
   }
 
   _measureBottomBarBounds() {
-    // No longer needed - bar position calculated directly
+    const c = this._config;
+    if (!c || !c.bottom_bar_enabled || c.bottom_bar_full_width) return;
+
+    const root = this.shadowRoot;
+    if (!root) return;
+
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    if (vw <= 0) return;
+
+    const fabs = Array.from(root.querySelectorAll(".fab-anchor .fab"));
+    if (!fabs.length) return;
+
+    const rects = [];
+    for (const el of fabs) {
+      try {
+        const r = el.getBoundingClientRect();
+        if (r && r.width > 0 && r.height > 0) rects.push(r);
+      } catch (_) {}
+    }
+    if (!rects.length) return;
+
+    const maxBottom = Math.max(...rects.map((r) => r.bottom));
+    const tol = 2;
+    const bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
+
+    const minLeft = Math.min(...bottomRow.map((r) => r.left));
+    const maxRight = Math.max(...bottomRow.map((r) => r.right));
+
+    const next = {
+      left: Math.max(0, Math.round(minLeft)),
+      right: Math.max(0, Math.round(vw - maxRight)),
+    };
+
+    const cur = this._bottomBarBounds;
+    const changed = !cur || cur.left !== next.left || cur.right !== next.right;
+    if (changed) {
+      this._bottomBarBounds = next;
+      this.requestUpdate();
+    }
   }
 
 
@@ -1203,11 +1251,11 @@ class HkiNavigationCard extends LitElement {
     }
 
     // Position the bar based on button alignment and full width setting
-    // Always use offsetX so bar moves with sidebar
     const offsetX = this._computeOffsetX();
     
     if (c.bottom_bar_full_width) {
-      // Full width: respect offsets so bar doesn't overlap sidebar
+      // Full width mode: span from offset to opposite edge
+      // Bar starts at offset position and goes to the edge
       if (c.position === "bottom-left") {
         styleParts.push(`left:${offsetX + marginLeft}px`);
         styleParts.push(`right:${marginRight}px`);
@@ -1215,26 +1263,21 @@ class HkiNavigationCard extends LitElement {
         styleParts.push(`left:${marginLeft}px`);
         styleParts.push(`right:${offsetX + marginRight}px`);
       } else {
-        // center - use smaller of the two offsets on both sides
-        const offset = Math.min(offsetX, marginLeft);
-        styleParts.push(`left:${offset}px`);
-        styleParts.push(`right:${offset}px`);
+        // center - use margins symmetrically
+        styleParts.push(`left:${marginLeft}px`);
+        styleParts.push(`right:${marginRight}px`);
       }
     } else {
-      // Follow buttons mode: position bar behind actual button bounds
-      if (c.position === "bottom-left") {
-        styleParts.push(`left:${offsetX + marginLeft}px`);
-        styleParts.push(`right:auto`);
-        styleParts.push(`width:calc(100% - ${offsetX + marginLeft + marginRight}px)`);
-      } else if (c.position === "bottom-right") {
-        styleParts.push(`right:${offsetX + marginRight}px`);
-        styleParts.push(`left:auto`);
-        styleParts.push(`width:calc(100% - ${offsetX + marginLeft + marginRight}px)`);
-      } else {
-        // center
-        styleParts.push(`left:${marginLeft}px`);
-        styleParts.push(`right:${marginRight}px`);
+      // Follow buttons mode: measure and position behind actual buttons
+      if (!this._bottomBarBounds) {
+        // Schedule measurement and return null until bounds are ready
+        this._scheduleMeasureBottomBar();
+        return null;
       }
+      
+      // Position bar using measured button bounds
+      styleParts.push(`left:${this._bottomBarBounds.left + marginLeft}px`);
+      styleParts.push(`right:${this._bottomBarBounds.right + marginRight}px`);
     }
 
     return html`
