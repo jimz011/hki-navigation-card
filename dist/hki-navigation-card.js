@@ -785,78 +785,39 @@ class HkiNavigationCard extends LitElement {
       width: Math.round(r.width)
     })));
 
-    // CRITICAL FIX: Filter by actual screen position FIRST
-    let screenPositionFiltered;
-    
-    if (c.position === "bottom-right" || c.position === "bottom-center") {
-      // Only include buttons whose LEFT edge is in the FAR RIGHT area (70% threshold)
-      const rightAreaThreshold = vw * 0.7; // Buttons must start after 70% of screen width
-      screenPositionFiltered = bottomRow.filter((r) => r.left >= rightAreaThreshold);
-      
-      console.log('[Bottom Bar] Right area threshold (70% of viewport):', Math.round(rightAreaThreshold));
-      console.log('[Bottom Bar] Buttons in right area:', screenPositionFiltered.length);
-      
-      // If no buttons found with 70% threshold, try 50%
-      if (!screenPositionFiltered.length) {
-        const fallbackThreshold = vw * 0.5;
-        screenPositionFiltered = bottomRow.filter((r) => r.left >= fallbackThreshold);
-        console.log('[Bottom Bar] No buttons at 70%, trying 50% threshold:', Math.round(fallbackThreshold));
-        console.log('[Bottom Bar] Buttons with fallback:', screenPositionFiltered.length);
-      }
-      
-    } else if (c.position === "bottom-left") {
-      // Only include buttons whose RIGHT edge is in the FAR LEFT area (30% threshold)
-      const leftAreaThreshold = vw * 0.3; // Buttons must end before 30% of screen width
-      screenPositionFiltered = bottomRow.filter((r) => r.right <= leftAreaThreshold);
-      
-      console.log('[Bottom Bar] Left area threshold (30% of viewport):', Math.round(leftAreaThreshold));
-      console.log('[Bottom Bar] Buttons in left area:', screenPositionFiltered.length);
-      
-      // If no buttons found with 30% threshold, try 50%
-      if (!screenPositionFiltered.length) {
-        const fallbackThreshold = vw * 0.5;
-        screenPositionFiltered = bottomRow.filter((r) => r.right <= fallbackThreshold);
-        console.log('[Bottom Bar] No buttons at 30%, trying 50% threshold:', Math.round(fallbackThreshold));
-        console.log('[Bottom Bar] Buttons with fallback:', screenPositionFiltered.length);
-      }
-    } else {
-      // Fallback
-      screenPositionFiltered = bottomRow;
-    }
-    
-    if (!screenPositionFiltered.length) {
-      console.log('[Bottom Bar] ERROR: No buttons found in expected screen area!');
-      return;
-    }
-    
-    // Now find the tightest cluster within the filtered buttons
+    // NEW SIMPLE APPROACH: Just take the N rightmost/leftmost buttons
     let mainCluster;
     
     if (c.position === "bottom-right" || c.position === "bottom-center") {
-      // Find rightmost button in the filtered set
-      const rightmost = screenPositionFiltered.reduce((max, r) => r.right > max.right ? r : max, screenPositionFiltered[0]);
+      // Sort by right edge position (rightmost first)
+      bottomRow.sort((a, b) => b.right - a.right);
       
-      // Include buttons within 250px of rightmost (tighter clustering)
-      const leftThreshold = rightmost.right - 250;
-      mainCluster = screenPositionFiltered.filter((r) => r.right >= leftThreshold);
+      // Take the 5 rightmost buttons (or all if less than 5)
+      const numButtons = Math.min(5, bottomRow.length);
+      mainCluster = bottomRow.slice(0, numButtons);
       
-      console.log('[Bottom Bar] Rightmost in filtered set:', Math.round(rightmost.right));
-      console.log('[Bottom Bar] Cluster threshold (250px):', Math.round(leftThreshold));
-      console.log('[Bottom Bar] Final cluster size:', mainCluster.length);
+      console.log('[Bottom Bar] Taking', numButtons, 'rightmost buttons');
+      console.log('[Bottom Bar] Selected buttons:', mainCluster.map(r => ({
+        left: Math.round(r.left),
+        right: Math.round(r.right)
+      })));
       
     } else if (c.position === "bottom-left") {
-      // Find leftmost button in the filtered set
-      const leftmost = screenPositionFiltered.reduce((min, r) => r.left < min.left ? r : min, screenPositionFiltered[0]);
+      // Sort by left edge position (leftmost first)
+      bottomRow.sort((a, b) => a.left - b.left);
       
-      // Include buttons within 250px of leftmost (tighter clustering)
-      const rightThreshold = leftmost.left + 250;
-      mainCluster = screenPositionFiltered.filter((r) => r.left <= rightThreshold);
+      // Take the 5 leftmost buttons (or all if less than 5)
+      const numButtons = Math.min(5, bottomRow.length);
+      mainCluster = bottomRow.slice(0, numButtons);
       
-      console.log('[Bottom Bar] Leftmost in filtered set:', Math.round(leftmost.left));
-      console.log('[Bottom Bar] Cluster threshold (250px):', Math.round(rightThreshold));
-      console.log('[Bottom Bar] Final cluster size:', mainCluster.length);
+      console.log('[Bottom Bar] Taking', numButtons, 'leftmost buttons');
+      console.log('[Bottom Bar] Selected buttons:', mainCluster.map(r => ({
+        left: Math.round(r.left),
+        right: Math.round(r.right)
+      })));
     } else {
-      mainCluster = screenPositionFiltered;
+      // Center - take all buttons
+      mainCluster = bottomRow;
     }
     
     if (!mainCluster.length) return;
@@ -3253,26 +3214,26 @@ class HkiNavigationCardEditor extends LitElement {
                 ></ha-switch>
               </ha-formfield>
 
-              <ha-formfield .label=${"Span full width"}>
-                <ha-switch
-                  .checked=${!!c.bottom_bar_full_width}
-                  @change=${(e) => this._setBool("bottom_bar_full_width", e.target.checked)}
-                ></ha-switch>
-              </ha-formfield>
+              ${c.bottom_bar_enabled ? html`
+                <ha-formfield .label=${"Span full width"}>
+                  <ha-switch
+                    .checked=${!!c.bottom_bar_full_width}
+                    @change=${(e) => this._setBool("bottom_bar_full_width", e.target.checked)}
+                  ></ha-switch>
+                </ha-formfield>
 
-              <ha-textfield
-                type="number"
-                .label=${"Bottom bar height (px)"}
-                .value=${String(c.bottom_bar_height)}
-                ?disabled=${!c.bottom_bar_enabled}
-                @change=${(e) => this._setValue("bottom_bar_height", Number(e.target.value))}
-              ></ha-textfield>
+                <ha-textfield
+                  type="number"
+                  .label=${"Bottom bar height (px)"}
+                  .value=${String(c.bottom_bar_height)}
+                  @change=${(e) => this._setValue("bottom_bar_height", Number(e.target.value))}
+                ></ha-textfield>
 
               <ha-textfield
                 type="number"
                 .label=${"Bottom bar bottom offset (px)"}
                 .value=${String(c.bottom_bar_bottom_offset)}
-                ?disabled=${!c.bottom_bar_enabled}
+                
                 @change=${(e) => this._setValue("bottom_bar_bottom_offset", Number(e.target.value))}
               ></ha-textfield>
 
@@ -3280,21 +3241,21 @@ class HkiNavigationCardEditor extends LitElement {
                 type="number"
                 .label=${"Bottom bar border radius (px)"}
                 .value=${String(c.bottom_bar_border_radius)}
-                ?disabled=${!c.bottom_bar_enabled}
+                
                 @change=${(e) => this._setValue("bottom_bar_border_radius", Number(e.target.value))}
               ></ha-textfield>
 
               <ha-textfield
                 .label=${"Bottom bar box-shadow (CSS)"}
                 .value=${c.bottom_bar_box_shadow || ""}
-                ?disabled=${!c.bottom_bar_enabled}
+                
                 @change=${(e) => this._setValue("bottom_bar_box_shadow", e.target.value)}
               ></ha-textfield>
 
               <ha-textfield
                 .label=${"Bottom bar color (CSS)"}
                 .value=${c.bottom_bar_color || ""}
-                ?disabled=${!c.bottom_bar_enabled}
+                
                 @change=${(e) => this._setValue("bottom_bar_color", e.target.value)}
               ></ha-textfield>
 
@@ -3305,7 +3266,7 @@ class HkiNavigationCardEditor extends LitElement {
                 max="1"
                 .label=${"Bottom bar opacity (0..1)"}
                 .value=${String(c.bottom_bar_opacity ?? 1)}
-                ?disabled=${!c.bottom_bar_enabled}
+                
                 @change=${(e) => this._setValue("bottom_bar_opacity", Number(e.target.value))}
               ></ha-textfield>
 
@@ -3313,7 +3274,7 @@ class HkiNavigationCardEditor extends LitElement {
                 type="number"
                 .label=${"Margin left (px)"}
                 .value=${String(c.bottom_bar_margin_left ?? 0)}
-                ?disabled=${!c.bottom_bar_enabled}
+                
                 @change=${(e) => this._setValue("bottom_bar_margin_left", Number(e.target.value))}
               ></ha-textfield>
 
@@ -3321,7 +3282,7 @@ class HkiNavigationCardEditor extends LitElement {
                 type="number"
                 .label=${"Margin right (px)"}
                 .value=${String(c.bottom_bar_margin_right ?? 0)}
-                ?disabled=${!c.bottom_bar_enabled}
+                
                 @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}
               ></ha-textfield>
 
@@ -3330,7 +3291,7 @@ class HkiNavigationCardEditor extends LitElement {
                   type="number"
                   .label=${"Border width (px)"}
                   .value=${String(c.bottom_bar_border_width ?? 0)}
-                  ?disabled=${!c.bottom_bar_enabled}
+                  
                   @change=${(e) => this._setValue("bottom_bar_border_width", Number(e.target.value))}
                 ></ha-textfield>
               ` : ''}
@@ -3340,7 +3301,7 @@ class HkiNavigationCardEditor extends LitElement {
                   .label=${"Border style"}
                   .value=${c.bottom_bar_border_style || "solid"}
                   placeholder="solid, dashed, dotted, etc."
-                  ?disabled=${!c.bottom_bar_enabled}
+                  
                   @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}
                 ></ha-textfield>
               ` : ''}
@@ -3350,7 +3311,7 @@ class HkiNavigationCardEditor extends LitElement {
                   .label=${"Border color (CSS)"}
                   .value=${c.bottom_bar_border_color || ""}
                   placeholder="(optional)"
-                  ?disabled=${!c.bottom_bar_enabled}
+                  
                   @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}
                 ></ha-textfield>
               ` : ''}
@@ -3358,6 +3319,7 @@ class HkiNavigationCardEditor extends LitElement {
               <div class="hint">
                 Purely visual. The bar follows button alignment. Use margins to adjust horizontal span. Does not affect click behavior.
               </div>
+              ` : ''}
             </div>
           </div>
 
