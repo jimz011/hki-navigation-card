@@ -753,6 +753,9 @@ class HkiNavigationCard extends LitElement {
   _measureBottomBarBounds() {
     const c = this._config;
     if (!c || !c.bottom_bar_enabled || c.bottom_bar_full_width) return;
+    
+    // Non-full-width only works with center alignment
+    if (c.position !== "bottom-center") return;
 
     const root = this.shadowRoot;
     if (!root) return;
@@ -785,40 +788,26 @@ class HkiNavigationCard extends LitElement {
       width: Math.round(r.width)
     })));
 
-    // NEW SIMPLE APPROACH: Just take the N rightmost/leftmost buttons
-    let mainCluster;
+    // SIMPLE APPROACH FOR CENTER ALIGNMENT: Take buttons near the center
+    // Center-aligned buttons should all be clustered near the middle of the viewport
+    const centerX = vw / 2;
     
-    if (c.position === "bottom-right" || c.position === "bottom-center") {
-      // Sort by right edge position (rightmost first)
-      bottomRow.sort((a, b) => b.right - a.right);
-      
-      // Take the 5 rightmost buttons (or all if less than 5)
-      const numButtons = Math.min(5, bottomRow.length);
-      mainCluster = bottomRow.slice(0, numButtons);
-      
-      console.log('[Bottom Bar] Taking', numButtons, 'rightmost buttons');
-      console.log('[Bottom Bar] Selected buttons:', mainCluster.map(r => ({
-        left: Math.round(r.left),
-        right: Math.round(r.right)
-      })));
-      
-    } else if (c.position === "bottom-left") {
-      // Sort by left edge position (leftmost first)
-      bottomRow.sort((a, b) => a.left - b.left);
-      
-      // Take the 5 leftmost buttons (or all if less than 5)
-      const numButtons = Math.min(5, bottomRow.length);
-      mainCluster = bottomRow.slice(0, numButtons);
-      
-      console.log('[Bottom Bar] Taking', numButtons, 'leftmost buttons');
-      console.log('[Bottom Bar] Selected buttons:', mainCluster.map(r => ({
-        left: Math.round(r.left),
-        right: Math.round(r.right)
-      })));
-    } else {
-      // Center - take all buttons
-      mainCluster = bottomRow;
-    }
+    // Take buttons that are within 40% of viewport width from center
+    // This captures buttons from 30% to 70% of viewport width
+    const threshold = vw * 0.4;
+    const mainCluster = bottomRow.filter(r => {
+      const buttonCenterX = (r.left + r.right) / 2;
+      return Math.abs(buttonCenterX - centerX) <= threshold;
+    });
+    
+    console.log('[Bottom Bar] Center alignment - viewport center:', Math.round(centerX));
+    console.log('[Bottom Bar] Threshold distance from center:', Math.round(threshold));
+    console.log('[Bottom Bar] Selected', mainCluster.length, 'buttons near center');
+    console.log('[Bottom Bar] Selected buttons:', mainCluster.map(r => ({
+      left: Math.round(r.left),
+      right: Math.round(r.right),
+      center: Math.round((r.left + r.right) / 2)
+    })));
     
     if (!mainCluster.length) return;
     
@@ -1308,8 +1297,10 @@ class HkiNavigationCard extends LitElement {
     }
 
     // Position the bar based on button alignment and full width setting
+    // Non-full-width only works with center alignment
+    const isFullWidth = c.bottom_bar_full_width || c.position !== "bottom-center";
     
-    if (c.bottom_bar_full_width) {
+    if (isFullWidth) {
       // Full width mode: truly span entire viewport width
       styleParts.push(`left:${marginLeft}px`);
       styleParts.push(`right:${marginRight}px`);
@@ -3215,12 +3206,18 @@ class HkiNavigationCardEditor extends LitElement {
               </ha-formfield>
 
               ${c.bottom_bar_enabled ? html`
-                <ha-formfield .label=${"Span full width"}>
-                  <ha-switch
-                    .checked=${!!c.bottom_bar_full_width}
-                    @change=${(e) => this._setBool("bottom_bar_full_width", e.target.checked)}
-                  ></ha-switch>
-                </ha-formfield>
+                ${c.position === "bottom-center" ? html`
+                  <ha-formfield .label=${"Span full width"}>
+                    <ha-switch
+                      .checked=${!!c.bottom_bar_full_width}
+                      @change=${(e) => this._setBool("bottom_bar_full_width", e.target.checked)}
+                    ></ha-switch>
+                  </ha-formfield>
+                ` : html`
+                  <div class="hint" style="padding: 8px; background: rgba(255, 165, 0, 0.1); border-radius: 8px;">
+                    ℹ️ Non-full-width bar only available with center alignment. Bar will span full width.
+                  </div>
+                `}
 
                 <ha-textfield
                   type="number"
