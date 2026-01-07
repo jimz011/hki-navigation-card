@@ -772,16 +772,27 @@ class HkiNavigationCard extends LitElement {
     }
     if (!rects.length) return;
 
+    // Find the bottom-most row of buttons
     const maxBottom = Math.max(...rects.map((r) => r.bottom));
     const tol = 2;
     const bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
+    
+    if (!bottomRow.length) return;
 
-    const minLeft = Math.min(...bottomRow.map((r) => r.left));
+    // Find the rightmost button in the bottom row
     const maxRight = Math.max(...bottomRow.map((r) => r.right));
+    
+    // For alignment-based layouts, filter to buttons in the main cluster
+    // Only include buttons within 20% of viewport width of the rightmost button
+    const rightThreshold = maxRight - (vw * 0.2);
+    const mainCluster = bottomRow.filter((r) => r.right >= rightThreshold);
+    
+    const minLeft = Math.min(...mainCluster.map((r) => r.left));
+    const finalMaxRight = Math.max(...mainCluster.map((r) => r.right));
 
     const next = {
       left: Math.max(0, Math.round(minLeft)),
-      right: Math.max(0, Math.round(vw - maxRight)),
+      right: Math.max(0, Math.round(vw - finalMaxRight)),
     };
 
     const cur = this._bottomBarBounds;
@@ -1224,8 +1235,8 @@ class HkiNavigationCard extends LitElement {
       ? c.bottom_bar_box_shadow.trim()
       : "";
 
-    const marginLeft = Math.max(0, clampNum(c.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left));
-    const marginRight = Math.max(0, clampNum(c.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right));
+    const marginLeft = clampNum(c.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left);
+    const marginRight = clampNum(c.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right);
     
     const borderWidth = Math.max(0, clampNum(c.bottom_bar_border_width, DEFAULTS.bottom_bar_border_width));
     const borderStyle = (typeof c.bottom_bar_border_style === "string" && c.bottom_bar_border_style.trim())
@@ -1251,25 +1262,25 @@ class HkiNavigationCard extends LitElement {
     }
 
     // Position the bar based on button alignment and full width setting
-    const offsetX = this._computeOffsetX();
     
     if (c.bottom_bar_full_width) {
-      // Full width mode: offset is on sidebar side (left for most layouts)
-      // Bar spans from offset to opposite edge
-      styleParts.push(`left:${offsetX + marginLeft}px`);
+      // Full width mode: truly span entire viewport width
+      styleParts.push(`left:${marginLeft}px`);
       styleParts.push(`right:${marginRight}px`);
     } else {
       // Follow buttons mode: measure and position behind actual buttons
-      if (!this._bottomBarBounds) {
-        // Schedule measurement - in the meantime, use offset as fallback
-        this._scheduleMeasureBottomBar();
-        // Use offsetX as temporary position until measurement completes
-        styleParts.push(`left:${offsetX + marginLeft}px`);
-        styleParts.push(`right:${offsetX + marginRight}px`);
-      } else {
+      this._scheduleMeasureBottomBar();
+      
+      if (this._bottomBarBounds) {
         // Position bar using measured button bounds
+        // _bottomBarBounds.left is px from left edge, .right is px from right edge
         styleParts.push(`left:${this._bottomBarBounds.left + marginLeft}px`);
         styleParts.push(`right:${this._bottomBarBounds.right + marginRight}px`);
+      } else {
+        // Fallback position while measuring
+        const offsetX = this._computeOffsetX();
+        styleParts.push(`left:${offsetX + marginLeft}px`);
+        styleParts.push(`right:${offsetX + marginRight}px`);
       }
     }
 
