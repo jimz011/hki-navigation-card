@@ -429,8 +429,8 @@ const DEFAULTS = {
   // Cosmetic bottom bar behind buttons
   bottom_bar_enabled: false,
   bottom_bar_height: 85,
-  bottom_bar_color: "rgba(var(--rgb-card-background-color, 0,0,0), 0.85)",
-  bottom_bar_opacity: 1,
+  bottom_bar_color: "rgb(var(--rgb-card-background-color, 0,0,0))",
+  bottom_bar_opacity: 0.85,
   // When true, the bar spans the entire viewport width. When false, it follows button position.
   bottom_bar_full_width: false,
   bottom_bar_border_radius: 0,
@@ -775,41 +775,48 @@ class HkiNavigationCard extends LitElement {
     // Find the bottom-most row of buttons
     const maxBottom = Math.max(...rects.map((r) => r.bottom));
     const tol = 2;
-    const bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
+    let bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
     
     if (!bottomRow.length) return;
 
-    // Sort buttons by position
-    bottomRow.sort((a, b) => {
-      if (c.position === "bottom-left") return a.left - b.left;
-      return b.right - a.right; // Sort right-to-left for right alignment
-    });
+    console.log('[Bottom Bar] Bottom row buttons:', bottomRow.map(r => ({
+      left: Math.round(r.left),
+      right: Math.round(r.right),
+      width: Math.round(r.width)
+    })));
 
-    // Find main cluster by detecting gaps
-    // Buttons in a cluster should be within ~150px of each other
-    const gapThreshold = 150;
-    const mainCluster = [bottomRow[0]];
+    // NEW APPROACH: Work backwards from the edge
+    let mainCluster;
     
-    for (let i = 1; i < bottomRow.length; i++) {
-      const prev = mainCluster[mainCluster.length - 1];
-      const curr = bottomRow[i];
+    if (c.position === "bottom-right" || c.position === "bottom-center") {
+      // Find the rightmost button
+      const rightmost = bottomRow.reduce((max, r) => r.right > max.right ? r : max, bottomRow[0]);
       
-      let gap;
-      if (c.position === "bottom-left") {
-        // For left-aligned, check gap between right edge of prev and left edge of curr
-        gap = curr.left - prev.right;
-      } else {
-        // For right-aligned, check gap between right edge of curr and left edge of prev
-        gap = prev.left - curr.right;
-      }
+      // Only include buttons within 400px LEFT of the rightmost button
+      const leftThreshold = rightmost.right - 400;
+      mainCluster = bottomRow.filter((r) => r.right >= leftThreshold);
       
-      if (gap <= gapThreshold) {
-        mainCluster.push(curr);
-      } else {
-        // Found a large gap, stop here
-        break;
-      }
+      console.log('[Bottom Bar] Rightmost button right edge:', Math.round(rightmost.right));
+      console.log('[Bottom Bar] Left threshold:', Math.round(leftThreshold));
+      console.log('[Bottom Bar] Buttons in cluster:', mainCluster.length);
+      
+    } else if (c.position === "bottom-left") {
+      // Find the leftmost button
+      const leftmost = bottomRow.reduce((min, r) => r.left < min.left ? r : min, bottomRow[0]);
+      
+      // Only include buttons within 400px RIGHT of the leftmost button
+      const rightThreshold = leftmost.left + 400;
+      mainCluster = bottomRow.filter((r) => r.left <= rightThreshold);
+      
+      console.log('[Bottom Bar] Leftmost button left edge:', Math.round(leftmost.left));
+      console.log('[Bottom Bar] Right threshold:', Math.round(rightThreshold));
+      console.log('[Bottom Bar] Buttons in cluster:', mainCluster.length);
+    } else {
+      // Fallback to all bottom row buttons
+      mainCluster = bottomRow;
     }
+    
+    if (!mainCluster.length) return;
     
     const minLeft = Math.min(...mainCluster.map((r) => r.left));
     const maxRight = Math.max(...mainCluster.map((r) => r.right));
@@ -820,12 +827,13 @@ class HkiNavigationCard extends LitElement {
     };
     
     // Debug logging
-    console.log('[Bottom Bar] Measured cluster:', {
-      buttons: mainCluster.length,
-      minLeft,
-      maxRight,
+    console.log('[Bottom Bar] FINAL RESULT:', {
+      position: c.position,
+      minLeft: Math.round(minLeft),
+      maxRight: Math.round(maxRight),
       viewportWidth: vw,
-      result: next
+      barLeft: next.left,
+      barRight: next.right
     });
 
     const cur = this._bottomBarBounds;
