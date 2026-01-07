@@ -779,41 +779,68 @@ class HkiNavigationCard extends LitElement {
     
     if (!bottomRow.length) return;
 
-    console.log('[Bottom Bar] Bottom row buttons:', bottomRow.map(r => ({
+    console.log('[Bottom Bar] All bottom row buttons:', bottomRow.map(r => ({
       left: Math.round(r.left),
       right: Math.round(r.right),
       width: Math.round(r.width)
     })));
 
-    // NEW APPROACH: Work backwards from the edge
+    // CRITICAL FIX: Filter by actual screen position FIRST
+    let screenPositionFiltered;
+    
+    if (c.position === "bottom-right" || c.position === "bottom-center") {
+      // Only include buttons whose LEFT edge is in the right 60% of screen
+      const rightAreaThreshold = vw * 0.4; // Buttons must start after 40% of screen width
+      screenPositionFiltered = bottomRow.filter((r) => r.left >= rightAreaThreshold);
+      
+      console.log('[Bottom Bar] Right area threshold (40% of viewport):', Math.round(rightAreaThreshold));
+      console.log('[Bottom Bar] Buttons in right area:', screenPositionFiltered.length);
+      
+    } else if (c.position === "bottom-left") {
+      // Only include buttons whose RIGHT edge is in the left 60% of screen
+      const leftAreaThreshold = vw * 0.6; // Buttons must end before 60% of screen width
+      screenPositionFiltered = bottomRow.filter((r) => r.right <= leftAreaThreshold);
+      
+      console.log('[Bottom Bar] Left area threshold (60% of viewport):', Math.round(leftAreaThreshold));
+      console.log('[Bottom Bar] Buttons in left area:', screenPositionFiltered.length);
+    } else {
+      // Fallback
+      screenPositionFiltered = bottomRow;
+    }
+    
+    if (!screenPositionFiltered.length) {
+      console.log('[Bottom Bar] ERROR: No buttons found in expected screen area!');
+      return;
+    }
+    
+    // Now find the tightest cluster within the filtered buttons
     let mainCluster;
     
     if (c.position === "bottom-right" || c.position === "bottom-center") {
-      // Find the rightmost button
-      const rightmost = bottomRow.reduce((max, r) => r.right > max.right ? r : max, bottomRow[0]);
+      // Find rightmost button in the filtered set
+      const rightmost = screenPositionFiltered.reduce((max, r) => r.right > max.right ? r : max, screenPositionFiltered[0]);
       
-      // Only include buttons within 400px LEFT of the rightmost button
+      // Include buttons within 400px of rightmost
       const leftThreshold = rightmost.right - 400;
-      mainCluster = bottomRow.filter((r) => r.right >= leftThreshold);
+      mainCluster = screenPositionFiltered.filter((r) => r.right >= leftThreshold);
       
-      console.log('[Bottom Bar] Rightmost button right edge:', Math.round(rightmost.right));
-      console.log('[Bottom Bar] Left threshold:', Math.round(leftThreshold));
-      console.log('[Bottom Bar] Buttons in cluster:', mainCluster.length);
+      console.log('[Bottom Bar] Rightmost in filtered set:', Math.round(rightmost.right));
+      console.log('[Bottom Bar] Cluster threshold:', Math.round(leftThreshold));
+      console.log('[Bottom Bar] Final cluster size:', mainCluster.length);
       
     } else if (c.position === "bottom-left") {
-      // Find the leftmost button
-      const leftmost = bottomRow.reduce((min, r) => r.left < min.left ? r : min, bottomRow[0]);
+      // Find leftmost button in the filtered set
+      const leftmost = screenPositionFiltered.reduce((min, r) => r.left < min.left ? r : min, screenPositionFiltered[0]);
       
-      // Only include buttons within 400px RIGHT of the leftmost button
+      // Include buttons within 400px of leftmost
       const rightThreshold = leftmost.left + 400;
-      mainCluster = bottomRow.filter((r) => r.left <= rightThreshold);
+      mainCluster = screenPositionFiltered.filter((r) => r.left <= rightThreshold);
       
-      console.log('[Bottom Bar] Leftmost button left edge:', Math.round(leftmost.left));
-      console.log('[Bottom Bar] Right threshold:', Math.round(rightThreshold));
-      console.log('[Bottom Bar] Buttons in cluster:', mainCluster.length);
+      console.log('[Bottom Bar] Leftmost in filtered set:', Math.round(leftmost.left));
+      console.log('[Bottom Bar] Cluster threshold:', Math.round(rightThreshold));
+      console.log('[Bottom Bar] Final cluster size:', mainCluster.length);
     } else {
-      // Fallback to all bottom row buttons
-      mainCluster = bottomRow;
+      mainCluster = screenPositionFiltered;
     }
     
     if (!mainCluster.length) return;
@@ -827,7 +854,7 @@ class HkiNavigationCard extends LitElement {
     };
     
     // Debug logging
-    console.log('[Bottom Bar] FINAL RESULT:', {
+    console.log('[Bottom Bar] ✅ FINAL RESULT:', {
       position: c.position,
       minLeft: Math.round(minLeft),
       maxRight: Math.round(maxRight),
@@ -3286,7 +3313,7 @@ class HkiNavigationCardEditor extends LitElement {
                 type="number"
                 .label=${"Border width (px)"}
                 .value=${String(c.bottom_bar_border_width ?? 0)}
-                ?disabled=${!c.bottom_bar_enabled}
+                ?disabled=${!c.bottom_bar_enabled || c.bottom_bar_full_width}
                 @change=${(e) => this._setValue("bottom_bar_border_width", Number(e.target.value))}
               ></ha-textfield>
 
@@ -3294,7 +3321,7 @@ class HkiNavigationCardEditor extends LitElement {
                 .label=${"Border style"}
                 .value=${c.bottom_bar_border_style || "solid"}
                 placeholder="solid, dashed, dotted, etc."
-                ?disabled=${!c.bottom_bar_enabled}
+                ?disabled=${!c.bottom_bar_enabled || c.bottom_bar_full_width}
                 @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}
               ></ha-textfield>
 
@@ -3302,7 +3329,7 @@ class HkiNavigationCardEditor extends LitElement {
                 .label=${"Border color (CSS)"}
                 .value=${c.bottom_bar_border_color || ""}
                 placeholder="(optional)"
-                ?disabled=${!c.bottom_bar_enabled}
+                ?disabled=${!c.bottom_bar_enabled || c.bottom_bar_full_width}
                 @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}
               ></ha-textfield>
 
