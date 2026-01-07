@@ -7,8 +7,10 @@
 [![Maintained](https://img.shields.io/badge/Maintained-Yes-green.svg)](https://github.com/jimz011/hki-navigation-card/graphs/commit-activity)
 
 A modern, highly customizable navigation card for Home Assistant with fixed-position buttons and advanced styling options.
+The options are endless and therefor this documentation might not be complete, might contain errors or missing links/pages.
 
-***You may also want to check out the [HKI Header Card](https://github.com/jimz011/hki-header-card).
+***NOTE: This card may contain bugs***
+***You may also want to check out the [HKI Header Card](https://github.com/jimz011/hki-header-card)***
 
 ---
 ## 📸 Screenshots
