@@ -421,20 +421,17 @@ const DEFAULTS = {
 
   center_spread: false,
 
-  // Manual offsets (open/closed sidebar) - preserved config keys
-  sidebar_offset_mode: "auto",
-  offset_x_sidebar_closed: 70,
-  offset_x_sidebar_open: 260,
-  offset_x_sidebar_closed_left: 70,
-  offset_x_sidebar_open_left: 260,
-
+  // Screen-size-based offsets
+  offset_x_mobile: 16,      // < 768px
+  offset_x_tablet: 32,      // 768px - 1024px  
+  offset_x_desktop: 70,     // > 1024px
 
   // Cosmetic bottom bar behind buttons
   bottom_bar_enabled: false,
   bottom_bar_height: 85,
   bottom_bar_color: "rgba(var(--rgb-card-background-color, 0,0,0), 0.85)",
   bottom_bar_opacity: 1,
-  // When true, the bar spans the full width respecting offsets. When false, it follows button bounds.
+  // When true, the bar spans the entire viewport width. When false, it follows button position.
   bottom_bar_full_width: false,
   bottom_bar_border_radius: 0,
   bottom_bar_box_shadow: "",
@@ -562,8 +559,8 @@ function normalizeConfig(cfg) {
   c.bottom_bar_border_radius = Math.max(0, clampNum(raw.bottom_bar_border_radius, DEFAULTS.bottom_bar_border_radius));
   c.bottom_bar_bottom_offset = clampNum(raw.bottom_bar_bottom_offset, DEFAULTS.bottom_bar_bottom_offset);
   c.bottom_bar_box_shadow = (typeof raw.bottom_bar_box_shadow === "string") ? raw.bottom_bar_box_shadow : DEFAULTS.bottom_bar_box_shadow;
-  c.bottom_bar_margin_left = clampNum(raw.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left);
-  c.bottom_bar_margin_right = clampNum(raw.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right);
+  c.bottom_bar_margin_left = Math.max(0, clampNum(raw.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left));
+  c.bottom_bar_margin_right = Math.max(0, clampNum(raw.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right));
   c.bottom_bar_border_width = Math.max(0, clampNum(raw.bottom_bar_border_width, DEFAULTS.bottom_bar_border_width));
   c.bottom_bar_border_style = (typeof raw.bottom_bar_border_style === "string") ? raw.bottom_bar_border_style : DEFAULTS.bottom_bar_border_style;
   c.bottom_bar_border_color = (typeof raw.bottom_bar_border_color === "string") ? raw.bottom_bar_border_color : DEFAULTS.bottom_bar_border_color;
@@ -601,11 +598,10 @@ function normalizeConfig(cfg) {
 
   c.center_spread = !!c.center_spread;
 
-  c.sidebar_offset_mode = c.sidebar_offset_mode === "manual" ? "manual" : "auto";
-  c.offset_x_sidebar_closed = clampNum(c.offset_x_sidebar_closed, c.offset_x);
-  c.offset_x_sidebar_open = clampNum(c.offset_x_sidebar_open, DEFAULTS.offset_x_sidebar_open);
-  c.offset_x_sidebar_closed_left = clampNum(c.offset_x_sidebar_closed_left, c.offset_x);
-  c.offset_x_sidebar_open_left = clampNum(c.offset_x_sidebar_open_left, DEFAULTS.offset_x_sidebar_open_left);
+  // Screen-size-based offsets
+  c.offset_x_mobile = clampNum(raw.offset_x_mobile, DEFAULTS.offset_x_mobile);
+  c.offset_x_tablet = clampNum(raw.offset_x_tablet, DEFAULTS.offset_x_tablet);
+  c.offset_x_desktop = clampNum(raw.offset_x_desktop, DEFAULTS.offset_x_desktop);
 
   {
     const [hb] = ensureButtonIdsInList(c.horizontal.buttons);
@@ -665,9 +661,7 @@ class HkiNavigationCard extends LitElement {
     this._bottomBarBounds = null;
 
     // UI state tracking
-    this._sidebarNarrow = true;
-    this._sidebarWidth = 0;
-    this._sidebarEl = null;
+    // Sidebar tracking removed - using screen-size-based offsets
 
     this._contentLeftMargin = 0;
     this._contentRightMargin = 0;
@@ -743,59 +737,11 @@ class HkiNavigationCard extends LitElement {
   }
 
   _scheduleMeasureBottomBar() {
-    const c = this._config;
-    if (!c || !c.bottom_bar_enabled || c.bottom_bar_full_width) {
-      if (this._bottomBarBounds) {
-        this._bottomBarBounds = null;
-        this.requestUpdate();
-      }
-      return;
-    }
-
-    if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
-    this._bottomBarMeasureRaf = requestAnimationFrame(() => this._measureBottomBarBounds());
+    // No longer needed - bar position calculated directly
   }
 
   _measureBottomBarBounds() {
-    const c = this._config;
-    if (!c || !c.bottom_bar_enabled || c.bottom_bar_full_width) return;
-
-    const root = this.shadowRoot;
-    if (!root) return;
-
-    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-    if (vw <= 0) return;
-
-    const fabs = Array.from(root.querySelectorAll(".fab-anchor .fab"));
-    if (!fabs.length) return;
-
-    const rects = [];
-    for (const el of fabs) {
-      try {
-        const r = el.getBoundingClientRect();
-        if (r && r.width > 0 && r.height > 0) rects.push(r);
-      } catch (_) {}
-    }
-    if (!rects.length) return;
-
-    const maxBottom = Math.max(...rects.map((r) => r.bottom));
-    const tol = 2;
-    const bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
-
-    const minLeft = Math.min(...bottomRow.map((r) => r.left));
-    const maxRight = Math.max(...bottomRow.map((r) => r.right));
-
-    const next = {
-      left: Math.max(0, Math.round(minLeft)),
-      right: Math.max(0, Math.round(vw - maxRight)),
-    };
-
-    const cur = this._bottomBarBounds;
-    const changed = !cur || cur.left !== next.left || cur.right !== next.right;
-    if (changed) {
-      this._bottomBarBounds = next;
-      this.requestUpdate();
-    }
+    // No longer needed - bar position calculated directly
   }
 
 
@@ -907,16 +853,7 @@ class HkiNavigationCard extends LitElement {
       const notRightDrawer = viewW <= 0 ? true : rect.right <= viewW * 0.65;
       return onLeft && notRightDrawer;
     });
-    this._sidebarEl = sb || null;
-
-    if (sb) {
-      this._sidebarWidth = sb.getBoundingClientRect().width || 0;
-      const narrow = sb.hasAttribute("narrow") || sb.narrow === true;
-      this._sidebarNarrow = !!narrow;
-    } else {
-      this._sidebarWidth = 0;
-      this._sidebarNarrow = true;
-    }
+    // Sidebar detection removed
 
     // Measure right edit panel (often a drawer on the right)
     const vw = window.innerWidth || document.documentElement.clientWidth || 0;
@@ -964,7 +901,7 @@ class HkiNavigationCard extends LitElement {
         } catch (_) {}
       };
 
-      observeElAttrs(this._sidebarEl, ["narrow", "expanded", "collapsed", "open", "opened", "style", "class"]);
+      // Sidebar observation removed
       observeElAttrs(this._rightPanelEl, ["open", "opened", "style", "class"]);
       observeElAttrs(document.body, ["class", "style"]);
       observeElAttrs(this._contentEl, ["style", "class"]);
@@ -982,7 +919,7 @@ class HkiNavigationCard extends LitElement {
             this._resizeObservers.push(ro);
           } catch (_) {}
         };
-        hookResize(this._sidebarEl);
+        // Sidebar resize observation removed
         hookResize(this._rightPanelEl);
         hookResize(this._contentEl);
       }
@@ -1199,41 +1136,24 @@ class HkiNavigationCard extends LitElement {
     this._scheduleMeasure();
   }
 
-  /* -------------------------- Offsets (AUTO uses real content margins) -------------------------- */
+  /* -------------------------- Screen-size-based offset -------------------------- */
 
   _computeOffsetX() {
     const c = this._config;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
 
-    // Best-effort "sidebar open" detection:
-    // - classic ha-sidebar: narrow=false means expanded
-    // - fallback: content left margin > ~90px indicates the content is being pushed by a wide sidebar
-    const sidebarOpen =
-      (!!(this._sidebarEl && !this._sidebarNarrow && this._sidebarWidth > 0)) ||
-      ((this._contentLeftMargin || 0) > 90);
-
-    if (c.sidebar_offset_mode === "manual") {
-      const open = sidebarOpen;
-
-      if (c.position === "bottom-left") {
-        return open ? c.offset_x_sidebar_open_left : c.offset_x_sidebar_closed_left;
-      }
-      if (c.position === "bottom-right") {
-        return open ? c.offset_x_sidebar_open : c.offset_x_sidebar_closed;
-      }
-      return c.offset_x;
+    // Determine offset based on screen width
+    let baseOffset = c.offset_x;
+    
+    if (vw < 768) {
+      baseOffset = c.offset_x_mobile;
+    } else if (vw < 1024) {
+      baseOffset = c.offset_x_tablet;
+    } else {
+      baseOffset = c.offset_x_desktop;
     }
 
-    // AUTO mode: anchor to the Lovelace content area (so it follows sidebar push/overlay, panel padding, etc.)
-    if (c.position === "bottom-left") {
-      return c.offset_x + (this._contentLeftMargin || 0);
-    }
-
-    if (c.position === "bottom-right") {
-      return c.offset_x + (this._contentRightMargin || 0);
-    }
-
-    // Bottom-center uses a different positioning strategy; offset_x is used as extra padding (when spread) only.
-    return c.offset_x;
+    return baseOffset;
   }
 
 
@@ -1256,8 +1176,8 @@ class HkiNavigationCard extends LitElement {
       ? c.bottom_bar_box_shadow.trim()
       : "";
 
-    const marginLeft = clampNum(c.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left);
-    const marginRight = clampNum(c.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right);
+    const marginLeft = Math.max(0, clampNum(c.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left));
+    const marginRight = Math.max(0, clampNum(c.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right));
     
     const borderWidth = Math.max(0, clampNum(c.bottom_bar_border_width, DEFAULTS.bottom_bar_border_width));
     const borderStyle = (typeof c.bottom_bar_border_style === "string" && c.bottom_bar_border_style.trim())
@@ -1267,40 +1187,54 @@ class HkiNavigationCard extends LitElement {
       ? c.bottom_bar_border_color.trim()
       : "";
 
-    let left = 0;
-    let right = 0;
-
-    if (c.bottom_bar_full_width) {
-      // Full width mode: respect the button offsets so bar doesn't overlap sidebar
-      const offsetX = this._computeOffsetX();
-      left = offsetX + marginLeft;
-      right = offsetX + marginRight;
-    } else {
-      // Follow buttons mode: position bar behind actual button bounds
-      if (!this._bottomBarBounds) {
-        // Schedule measurement and show nothing until bounds are calculated
-        this._scheduleMeasureBottomBar();
-        return null;
-      }
-      left = this._bottomBarBounds.left + marginLeft;
-      right = this._bottomBarBounds.right + marginRight;
-    }
-
     const styleParts = [
-      `left:${left}px`,
-      `right:${right}px`,
-      `bottom:${bottom}px`,
       `height:${height}px`,
       `background:${color}`,
       `opacity:${opacity}`,
       `z-index:${z}`,
       `border-radius:${radius}px`,
+      `bottom:${bottom}px`,
     ];
     
     if (shadow) styleParts.push(`box-shadow:${shadow}`);
     
     if (borderWidth > 0 && borderColor) {
       styleParts.push(`border: ${borderWidth}px ${borderStyle} ${borderColor}`);
+    }
+
+    // Position the bar based on button alignment and full width setting
+    // Always use offsetX so bar moves with sidebar
+    const offsetX = this._computeOffsetX();
+    
+    if (c.bottom_bar_full_width) {
+      // Full width: respect offsets so bar doesn't overlap sidebar
+      if (c.position === "bottom-left") {
+        styleParts.push(`left:${offsetX + marginLeft}px`);
+        styleParts.push(`right:${marginRight}px`);
+      } else if (c.position === "bottom-right") {
+        styleParts.push(`left:${marginLeft}px`);
+        styleParts.push(`right:${offsetX + marginRight}px`);
+      } else {
+        // center - use smaller of the two offsets on both sides
+        const offset = Math.min(offsetX, marginLeft);
+        styleParts.push(`left:${offset}px`);
+        styleParts.push(`right:${offset}px`);
+      }
+    } else {
+      // Follow buttons mode: position bar behind actual button bounds
+      if (c.position === "bottom-left") {
+        styleParts.push(`left:${offsetX + marginLeft}px`);
+        styleParts.push(`right:auto`);
+        styleParts.push(`width:calc(100% - ${offsetX + marginLeft + marginRight}px)`);
+      } else if (c.position === "bottom-right") {
+        styleParts.push(`right:${offsetX + marginRight}px`);
+        styleParts.push(`left:auto`);
+        styleParts.push(`width:calc(100% - ${offsetX + marginLeft + marginRight}px)`);
+      } else {
+        // center
+        styleParts.push(`left:${marginLeft}px`);
+        styleParts.push(`right:${marginRight}px`);
+      }
     }
 
     return html`
@@ -3233,7 +3167,7 @@ class HkiNavigationCardEditor extends LitElement {
 
               <ha-textfield
                 type="number"
-                .label=${"Margin left (px) — adjust bar span"}
+                .label=${"Margin left (px)"}
                 .value=${String(c.bottom_bar_margin_left ?? 0)}
                 ?disabled=${!c.bottom_bar_enabled}
                 @change=${(e) => this._setValue("bottom_bar_margin_left", Number(e.target.value))}
@@ -3241,7 +3175,7 @@ class HkiNavigationCardEditor extends LitElement {
 
               <ha-textfield
                 type="number"
-                .label=${"Margin right (px) — adjust bar span"}
+                .label=${"Margin right (px)"}
                 .value=${String(c.bottom_bar_margin_right ?? 0)}
                 ?disabled=${!c.bottom_bar_enabled}
                 @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}
@@ -3272,46 +3206,8 @@ class HkiNavigationCardEditor extends LitElement {
               ></ha-textfield>
 
               <div class="hint">
-                When "Span full width" is ON: bar respects button offsets (won't overlap sidebar).<br>
-                When OFF: bar dynamically follows button positions. Use margins to extend/shrink the bar horizontally.
+                Purely visual. The bar follows button alignment. Use margins to adjust horizontal span. Does not affect click behavior.
               </div>
-            </div>
-          </div>
-
-          <div class="subsection">
-            <div class="subheader">Sidebar offset</div>
-            <div class="grid2">
-              <ha-select
-                .label=${"Sidebar offset mode"}
-                .value=${c.sidebar_offset_mode}
-                @selected=${(e) => this._setValue("sidebar_offset_mode", e.target.value)}
-                @closed=${(e) => e.stopPropagation()}
-              >
-                <mwc-list-item value="auto">Auto (recommended)</mwc-list-item>
-                <mwc-list-item value="manual">Manual</mwc-list-item>
-              </ha-select>
-
-              ${c.sidebar_offset_mode === "manual" && c.position === "bottom-left"
-                ? html`
-                    <ha-textfield type="number" .label=${"Offset X when sidebar closed"} .value=${String(c.offset_x_sidebar_closed_left)}
-                      @change=${(e) => this._setValue("offset_x_sidebar_closed_left", Number(e.target.value))}></ha-textfield>
-                    <ha-textfield type="number" .label=${"Offset X when sidebar open"} .value=${String(c.offset_x_sidebar_open_left)}
-                      @change=${(e) => this._setValue("offset_x_sidebar_open_left", Number(e.target.value))}></ha-textfield>
-                  `
-                : html``}
-
-              ${c.sidebar_offset_mode === "manual" && c.position === "bottom-right"
-                ? html`
-                    <ha-textfield type="number" .label=${"Offset X when sidebar closed"} .value=${String(c.offset_x_sidebar_closed)}
-                      @change=${(e) => this._setValue("offset_x_sidebar_closed", Number(e.target.value))}></ha-textfield>
-                    <ha-textfield type="number" .label=${"Offset X when sidebar open"} .value=${String(c.offset_x_sidebar_open)}
-                      @change=${(e) => this._setValue("offset_x_sidebar_open", Number(e.target.value))}></ha-textfield>
-                  `
-                : html``}
-
-              ${c.sidebar_offset_mode === "auto"
-                ? html`<div class="hint">Auto follows the real view margins, so it tracks sidebar open/closed correctly.</div>`
-                : html``}
             </div>
           </div>
 
