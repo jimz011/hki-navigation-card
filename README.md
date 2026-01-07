@@ -10,6 +10,7 @@ A modern, highly customizable navigation card for Home Assistant with fixed-posi
 The options are endless and therefor this documentation might not be complete, might contain errors or missing links/pages.
 
 ***NOTE: This card may contain bugs***
+
 ***You may also want to check out the [HKI Header Card](https://github.com/jimz011/hki-header-card)***
 
 ---
