@@ -46,14 +46,26 @@ If you don't have HACS installed:
 
 ### Step 2: Add HKI Navigation Card
 
+#### Add Custom Repository
+
+Since this card is not yet in the default HACS store, you need to add it as a custom repository first:
+
 1. Open HACS in Home Assistant
-2. Click on **"Frontend"** in the HACS menu
-3. Click the **"+ Explore & Download Repositories"** button (bottom right)
-4. Search for **"HKI Navigation Card"**
-5. Click on the card in the search results
-6. Click **"Download"**
-7. Select the latest version
-8. Click **"Download"** again to confirm
+2. Click the **three dots** (⋮) in the top right corner
+3. Select **"Custom repositories"**
+4. Add the repository URL: `https://github.com/jimz011/hki-navigation-card`
+5. Select category: **"Lovelace"**
+6. Click **"Add"**
+
+#### Download the Card
+
+1. In HACS, click on **"Frontend"**
+2. Click the **"+ Explore & Download Repositories"** button (bottom right)
+3. Search for **"HKI Navigation Card"**
+4. Click on the card in the search results
+5. Click **"Download"**
+6. Select the latest version
+7. Click **"Download"** again to confirm
 
 ### Step 3: Restart Home Assistant
 
