@@ -1233,20 +1233,8 @@ class HkiNavigationCard extends LitElement {
 
   _computeOffsetX() {
     const c = this._config;
-    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-
-    // Determine offset based on screen width
-    let baseOffset = c.offset_x;
-    
-    if (vw < 768) {
-      baseOffset = c.offset_x_mobile;
-    } else if (vw < 1024) {
-      baseOffset = c.offset_x_tablet;
-    } else {
-      baseOffset = c.offset_x_desktop;
-    }
-
-    return baseOffset;
+    // Use the offset_x value from UI (which users can set)
+    return c.offset_x || 0;
   }
 
 
