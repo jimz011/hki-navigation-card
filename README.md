@@ -13,8 +13,14 @@ A modern, highly customizable navigation card for Home Assistant with fixed-posi
 ---
 ## 📸 Screenshots
 
-<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-3.png?raw=true" width="600" alt="HKI Navigation Card Example 2"><br><img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-4.png?raw=true" width="600" alt="HKI Navigation Card Example 3"><br><img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-5.png?raw=true" width="600" alt="HKI Header Navigation Example 4"><br><img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-6.png?raw=true" width="600" alt="HKI Navigation Card Example 5"><br><img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-7.png?raw=true" width="600" alt="HKI Navigation Card Example 6"><br><img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-8.png?raw=true" width="600" alt="HKI Navigation Card Example 7"><br><img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-9.png?raw=true" width="600" alt="HKI Navigation Card Example 8"><br><img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image.webp?raw=true" width="600" alt="HKI Navigation Card Example 9"><br>
----
+<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-3.png?raw=true" width="600" alt="HKI Navigation Card Example 2">
+<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-4.png?raw=true" width="600" alt="HKI Navigation Card Example 3">
+<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-5.png?raw=true" width="600" alt="HKI Header Navigation Example 4">
+<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-6.png?raw=true" width="600" alt="HKI Navigation Card Example 5">
+<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-7.png?raw=true" width="600" alt="HKI Navigation Card Example 6">
+<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-8.png?raw=true" width="600" alt="HKI Navigation Card Example 7">
+<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image-9.png?raw=true" width="600" alt="HKI Navigation Card Example 8">
+<img src="https://github.com/jimz011/hki-navigation-card/blob/main/screenshots/image.webp?raw=true" width="600" alt="HKI Navigation Card Example 9">
 
 ---
 
