@@ -421,10 +421,10 @@ const DEFAULTS = {
 
   center_spread: false,
 
-  // Screen-size-based offsets
-  offset_x_mobile: 16,      // < 768px
-  offset_x_tablet: 32,      // 768px - 1024px  
-  offset_x_desktop: 70,     // > 1024px
+  // Screen-size-based offsets (optional overrides for base offset_x)
+  offset_x_mobile: null,      // < 768px - null means use base offset_x
+  offset_x_tablet: null,      // 768px - 1024px - null means use base offset_x
+  offset_x_desktop: null,     // > 1024px - null means use base offset_x
 
   // Cosmetic bottom bar behind buttons
   bottom_bar_enabled: false,
@@ -598,10 +598,16 @@ function normalizeConfig(cfg) {
 
   c.center_spread = !!c.center_spread;
 
-  // Screen-size-based offsets
-  c.offset_x_mobile = clampNum(raw.offset_x_mobile, DEFAULTS.offset_x_mobile);
-  c.offset_x_tablet = clampNum(raw.offset_x_tablet, DEFAULTS.offset_x_tablet);
-  c.offset_x_desktop = clampNum(raw.offset_x_desktop, DEFAULTS.offset_x_desktop);
+  // Screen-size-based offsets (optional overrides)
+  c.offset_x_mobile = (raw.offset_x_mobile !== undefined && raw.offset_x_mobile !== null && raw.offset_x_mobile !== "")
+    ? Number(raw.offset_x_mobile)
+    : null;
+  c.offset_x_tablet = (raw.offset_x_tablet !== undefined && raw.offset_x_tablet !== null && raw.offset_x_tablet !== "")
+    ? Number(raw.offset_x_tablet)
+    : null;
+  c.offset_x_desktop = (raw.offset_x_desktop !== undefined && raw.offset_x_desktop !== null && raw.offset_x_desktop !== "")
+    ? Number(raw.offset_x_desktop)
+    : null;
 
   {
     const [hb] = ensureButtonIdsInList(c.horizontal.buttons);
@@ -1233,7 +1239,20 @@ class HkiNavigationCard extends LitElement {
 
   _computeOffsetX() {
     const c = this._config;
-    // Use the offset_x value from UI (which users can set)
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    
+    // Check for screen-size-specific overrides
+    if (vw < 768 && c.offset_x_mobile !== undefined && c.offset_x_mobile !== null) {
+      return c.offset_x_mobile;
+    }
+    if (vw >= 768 && vw < 1024 && c.offset_x_tablet !== undefined && c.offset_x_tablet !== null) {
+      return c.offset_x_tablet;
+    }
+    if (vw >= 1024 && c.offset_x_desktop !== undefined && c.offset_x_desktop !== null) {
+      return c.offset_x_desktop;
+    }
+    
+    // Use the base offset_x value from UI
     return c.offset_x || 0;
   }
 
@@ -1722,8 +1741,14 @@ class HkiNavigationCard extends LitElement {
         }
         return `left:50%; transform:translateX(-50%); bottom:${offsetY}px;`;
       }
-      if (c.position === "bottom-left") return `left:${offsetX}px; bottom:${offsetY}px;`;
-      return `right:${offsetX}px; bottom:${offsetY}px;`;
+      if (c.position === "bottom-left") {
+        // Add contentLeftMargin to account for sidebar
+        const lm = this._contentLeftMargin || 0;
+        return `left:${offsetX + lm}px; bottom:${offsetY}px;`;
+      }
+      // bottom-right: Add contentRightMargin to account for right panels
+      const rm = this._contentRightMargin || 0;
+      return `right:${offsetX + rm}px; bottom:${offsetY}px;`;
     })();
 
     const shadowVars = [];
@@ -3145,6 +3170,52 @@ class HkiNavigationCardEditor extends LitElement {
 
             <ha-textfield type="number" .label=${"Offset Y (px)"} .value=${String(c.offset_y)}
               @change=${(e) => this._setValue("offset_y", Number(e.target.value))}></ha-textfield>
+
+            <div style="grid-column: 1/-1; margin-top: 8px;">
+              <details>
+                <summary style="cursor: pointer; user-select: none; padding: 8px 0; color: var(--primary-text-color); font-weight: 500;">
+                  ⚙️ Advanced: Screen-size-specific offsets (optional)
+                </summary>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; padding: 12px; background: rgba(var(--rgb-primary-text-color), 0.05); border-radius: 8px;">
+                  <div class="hint" style="grid-column: 1/-1; margin: 0 0 8px 0;">
+                    Override the base Offset X for specific screen sizes. Leave blank to use the base offset. Automatically adjusts for sidebar.
+                  </div>
+                  
+                  <ha-textfield
+                    type="number"
+                    .label=${"Mobile offset X (< 768px)"}
+                    .value=${c.offset_x_mobile !== undefined && c.offset_x_mobile !== null ? String(c.offset_x_mobile) : ""}
+                    placeholder="Uses base offset X"
+                    @change=${(e) => {
+                      const val = e.target.value.trim();
+                      this._setValue("offset_x_mobile", val === "" ? null : Number(val));
+                    }}
+                  ></ha-textfield>
+
+                  <ha-textfield
+                    type="number"
+                    .label=${"Tablet offset X (768-1024px)"}
+                    .value=${c.offset_x_tablet !== undefined && c.offset_x_tablet !== null ? String(c.offset_x_tablet) : ""}
+                    placeholder="Uses base offset X"
+                    @change=${(e) => {
+                      const val = e.target.value.trim();
+                      this._setValue("offset_x_tablet", val === "" ? null : Number(val));
+                    }}
+                  ></ha-textfield>
+
+                  <ha-textfield
+                    type="number"
+                    .label=${"Desktop offset X (> 1024px)"}
+                    .value=${c.offset_x_desktop !== undefined && c.offset_x_desktop !== null ? String(c.offset_x_desktop) : ""}
+                    placeholder="Uses base offset X"
+                    @change=${(e) => {
+                      const val = e.target.value.trim();
+                      this._setValue("offset_x_desktop", val === "" ? null : Number(val));
+                    }}
+                  ></ha-textfield>
+                </div>
+              </details>
+            </div>
 
             <ha-textfield type="number" .label=${"Button size (px)"} .value=${String(c.button_size)}
               @change=${(e) => this._setValue("button_size", Number(e.target.value))}></ha-textfield>
