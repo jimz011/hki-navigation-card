@@ -1254,30 +1254,23 @@ class HkiNavigationCard extends LitElement {
     const offsetX = this._computeOffsetX();
     
     if (c.bottom_bar_full_width) {
-      // Full width mode: span from offset to opposite edge
-      // Bar starts at offset position and goes to the edge
-      if (c.position === "bottom-left") {
-        styleParts.push(`left:${offsetX + marginLeft}px`);
-        styleParts.push(`right:${marginRight}px`);
-      } else if (c.position === "bottom-right") {
-        styleParts.push(`left:${marginLeft}px`);
-        styleParts.push(`right:${offsetX + marginRight}px`);
-      } else {
-        // center - use margins symmetrically
-        styleParts.push(`left:${marginLeft}px`);
-        styleParts.push(`right:${marginRight}px`);
-      }
+      // Full width mode: offset is on sidebar side (left for most layouts)
+      // Bar spans from offset to opposite edge
+      styleParts.push(`left:${offsetX + marginLeft}px`);
+      styleParts.push(`right:${marginRight}px`);
     } else {
       // Follow buttons mode: measure and position behind actual buttons
       if (!this._bottomBarBounds) {
-        // Schedule measurement and return null until bounds are ready
+        // Schedule measurement - in the meantime, use offset as fallback
         this._scheduleMeasureBottomBar();
-        return null;
+        // Use offsetX as temporary position until measurement completes
+        styleParts.push(`left:${offsetX + marginLeft}px`);
+        styleParts.push(`right:${offsetX + marginRight}px`);
+      } else {
+        // Position bar using measured button bounds
+        styleParts.push(`left:${this._bottomBarBounds.left + marginLeft}px`);
+        styleParts.push(`right:${this._bottomBarBounds.right + marginRight}px`);
       }
-      
-      // Position bar using measured button bounds
-      styleParts.push(`left:${this._bottomBarBounds.left + marginLeft}px`);
-      styleParts.push(`right:${this._bottomBarBounds.right + marginRight}px`);
     }
 
     return html`
