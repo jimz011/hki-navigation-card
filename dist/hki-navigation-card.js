@@ -19,7 +19,7 @@ const CARD_TYPE = "hki-navigation-card";
 const VERSION = "1.0.0";
 
 // Log version once
-console.log(`%c${CARD_TYPE}%c v${VERSION}`, 'font-weight: bold; color: #00a8e8', 'color: #888');
+console.log(`%c${CARD_TYPE} %cv${VERSION}`, 'color: #17a2b8', 'color: #999');
 const CARD_TAG = "hki-navigation-card";
 const EDITOR_TAG = "hki-navigation-card-editor";
 
@@ -3620,4 +3620,6 @@ window.customCards.push({
   type: CARD_TYPE,
   name: "HKI Navigation Card",
   description: "Highly Customizable Navigation Bar.",
+  preview: false,
+  documentationURL: "https://github.com/jimz011/hki-navigation-card",
 });
