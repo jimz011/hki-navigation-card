@@ -433,11 +433,17 @@ const DEFAULTS = {
   bottom_bar_enabled: false,
   bottom_bar_height: 85,
   bottom_bar_color: "rgba(var(--rgb-card-background-color, 0,0,0), 0.85)",
+  bottom_bar_opacity: 1,
   // When true, the bar spans the entire viewport width. When false, it spans the Lovelace content width.
   bottom_bar_full_width: false,
   bottom_bar_border_radius: 0,
   bottom_bar_box_shadow: "",
   bottom_bar_bottom_offset: 0,
+  bottom_bar_padding_left: 0,
+  bottom_bar_padding_right: 0,
+  bottom_bar_border_width: 0,
+  bottom_bar_border_style: "solid",
+  bottom_bar_border_color: "",
   buttons: undefined,
   default_label_position: undefined,
   default_show_label: undefined,
@@ -552,10 +558,15 @@ function normalizeConfig(cfg) {
   c.bottom_bar_full_width = !!raw.bottom_bar_full_width;
   c.bottom_bar_height = Math.max(0, clampInt(raw.bottom_bar_height, DEFAULTS.bottom_bar_height, 0));
   c.bottom_bar_color = (typeof raw.bottom_bar_color === "string") ? raw.bottom_bar_color : DEFAULTS.bottom_bar_color;
-
+  c.bottom_bar_opacity = Math.max(0, Math.min(1, clampNum(raw.bottom_bar_opacity, DEFAULTS.bottom_bar_opacity)));
   c.bottom_bar_border_radius = Math.max(0, clampNum(raw.bottom_bar_border_radius, DEFAULTS.bottom_bar_border_radius));
   c.bottom_bar_bottom_offset = clampNum(raw.bottom_bar_bottom_offset, DEFAULTS.bottom_bar_bottom_offset);
   c.bottom_bar_box_shadow = (typeof raw.bottom_bar_box_shadow === "string") ? raw.bottom_bar_box_shadow : DEFAULTS.bottom_bar_box_shadow;
+  c.bottom_bar_padding_left = Math.max(0, clampNum(raw.bottom_bar_padding_left, DEFAULTS.bottom_bar_padding_left));
+  c.bottom_bar_padding_right = Math.max(0, clampNum(raw.bottom_bar_padding_right, DEFAULTS.bottom_bar_padding_right));
+  c.bottom_bar_border_width = Math.max(0, clampNum(raw.bottom_bar_border_width, DEFAULTS.bottom_bar_border_width));
+  c.bottom_bar_border_style = (typeof raw.bottom_bar_border_style === "string") ? raw.bottom_bar_border_style : DEFAULTS.bottom_bar_border_style;
+  c.bottom_bar_border_color = (typeof raw.bottom_bar_border_color === "string") ? raw.bottom_bar_border_color : DEFAULTS.bottom_bar_border_color;
 
   // Button shadows (CSS)
   c.button_box_shadow = (typeof raw.button_box_shadow === "string") ? raw.button_box_shadow : DEFAULTS.button_box_shadow;
@@ -653,27 +664,6 @@ class HkiNavigationCard extends LitElement {
     this._bottomBarMeasureRaf = null;
     this._bottomBarBounds = null;
 
-    this._uiRecalcRaf = null;
-
-    // Bottom inset (prevents last card being hidden under the fixed bar/buttons)
-    this._bottomInsetTarget = null;
-    this._bottomInsetPrevInline = null;
-    this._bottomInsetBasePx = null;
-
-    // Track transitions (sidebar/drawers often animate)
-    this._onTransitionEnd = (ev) => {
-      try {
-        const c = this._config;
-        if (!c || c.sidebar_offset_mode !== "auto") return;
-        const pn = ev?.propertyName || "";
-        // Only react to layout-relevant transitions
-        if (!pn || /width|left|right|margin|transform|translate/i.test(pn)) {
-          this._bumpUiRecalc(12);
-        }
-      } catch (_) {}
-    };
-
-
     // UI state tracking
     this._sidebarNarrow = true;
     this._sidebarWidth = 0;
@@ -695,22 +685,18 @@ class HkiNavigationCard extends LitElement {
       this.requestUpdate();
       this._scheduleMeasure();
       this._scheduleMeasureBottomBar();
-      this._applyBottomInset();
     };
   }
 
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener("resize", this._onResize);
-    document.body?.addEventListener?.("transitionend", this._onTransitionEnd, true);
     this._refreshUiState(true);
-    this._applyBottomInset();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("resize", this._onResize);
-    document.body?.removeEventListener?.("transitionend", this._onTransitionEnd, true);
 
     for (const o of this._uiObservers) {
       try { o.disconnect(); } catch (_) {}
@@ -725,10 +711,6 @@ class HkiNavigationCard extends LitElement {
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
 
     if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
-
-    if (this._uiRecalcRaf) cancelAnimationFrame(this._uiRecalcRaf);
-
-    this._clearBottomInset();
   }
 
   updated() {
@@ -737,7 +719,6 @@ class HkiNavigationCard extends LitElement {
     this._refreshUiState(false, true);
     this._scheduleMeasure();
     this._scheduleMeasureBottomBar();
-    this._applyBottomInset();
   }
 
   setConfig(config) {
@@ -763,8 +744,6 @@ class HkiNavigationCard extends LitElement {
 
   _scheduleMeasureBottomBar() {
     const c = this._config;
-
-    // If disabled or full-width, we don't need bounds
     if (!c || !c.bottom_bar_enabled || c.bottom_bar_full_width) {
       if (this._bottomBarBounds) {
         this._bottomBarBounds = null;
@@ -773,18 +752,8 @@ class HkiNavigationCard extends LitElement {
       return;
     }
 
-    // Measure for a few frames to catch layout/transition changes (sidebar animations, etc.)
-    const frames = 14;
     if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
-
-    let n = frames;
-    const step = () => {
-      this._measureBottomBarBounds();
-      n -= 1;
-      if (n > 0) this._bottomBarMeasureRaf = requestAnimationFrame(step);
-    };
-
-    this._bottomBarMeasureRaf = requestAnimationFrame(step);
+    this._bottomBarMeasureRaf = requestAnimationFrame(() => this._measureBottomBarBounds());
   }
 
   _measureBottomBarBounds() {
@@ -794,8 +763,10 @@ class HkiNavigationCard extends LitElement {
     const root = this.shadowRoot;
     if (!root) return;
 
-    // Buttons are rendered as <button class="fab ...">
-    const fabs = Array.from(root.querySelectorAll('.fab-anchor button.fab, .fab-anchor .fab'));
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    if (vw <= 0) return;
+
+    const fabs = Array.from(root.querySelectorAll(".fab-anchor .fab"));
     if (!fabs.length) return;
 
     const rects = [];
@@ -807,24 +778,20 @@ class HkiNavigationCard extends LitElement {
     }
     if (!rects.length) return;
 
-    // Find the bottom-most row (tolerant for sub-pixel/layout differences)
     const maxBottom = Math.max(...rects.map((r) => r.bottom));
-    const tol = 8;
-    const bottomRow = rects.filter((r) => r.bottom >= (maxBottom - tol));
-    if (!bottomRow.length) return;
+    const tol = 2;
+    const bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
 
     const minLeft = Math.min(...bottomRow.map((r) => r.left));
     const maxRight = Math.max(...bottomRow.map((r) => r.right));
 
-    // Add a tiny padding so the bar peeks behind the group nicely
-    const pad = 10;
-    const left = Math.max(0, Math.round(minLeft - pad));
-    const width = Math.max(0, Math.round((maxRight - minLeft) + pad * 2));
-
-    const next = { left, width };
+    const next = {
+      left: Math.max(0, Math.round(minLeft)),
+      right: Math.max(0, Math.round(vw - maxRight)),
+    };
 
     const cur = this._bottomBarBounds;
-    const changed = !cur || cur.left !== next.left || cur.width !== next.width;
+    const changed = !cur || cur.left !== next.left || cur.right !== next.right;
     if (changed) {
       this._bottomBarBounds = next;
       this.requestUpdate();
@@ -843,7 +810,7 @@ class HkiNavigationCard extends LitElement {
   }
 
   // Deep query into shadow DOMs
-  _queryDeep(selector, root = document, maxDepth = 25) {
+  _queryDeep(selector, root = document, maxDepth = 12) {
     const results = [];
     const visited = new Set();
 
@@ -895,70 +862,33 @@ class HkiNavigationCard extends LitElement {
 
     const predicate = (_el, rect) => rect.width >= 200 && rect.height >= 200;
 
-    // Candidates that often represent the *actual* scroll/view container or its inner content.
-    // Some HA layouts keep the outer element full-width, but change padding/margins when the sidebar toggles.
-    const candidates = [
-      ...this._queryDeep("#view"),
-      ...this._queryDeep("#content"),
-      ...this._queryDeep("#contentContainer"),
+    // Prefer actual "view" elements over the outer ha-panel-lovelace container (which may span full width).
+    const preferred = [
       ...this._queryDeep("hui-sections-view"),
       ...this._queryDeep("hui-view"),
       ...this._queryDeep("hui-masonry-view"),
-      ...this._queryDeep("ha-panel-lovelace"),
-      ...this._queryDeep("ha-app-layout"),
     ];
 
-    let best = null;
-    let bestScore = -1;
+    let el = this._findVisibleBest(preferred, predicate);
 
-    for (const el of candidates) {
-      try {
-        const rect = el.getBoundingClientRect();
-        const style = window.getComputedStyle(el);
-        if (style.display === "none" || style.visibility === "hidden") continue;
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        if (predicate && !predicate(el, rect)) continue;
-
-        const padL = parseFloat(style.paddingLeft) || 0;
-        const padR = parseFloat(style.paddingRight) || 0;
-        const marL = parseFloat(style.marginLeft) || 0;
-        const marR = parseFloat(style.marginRight) || 0;
-
-        const insetL = Math.max(0, rect.left + padL + marL);
-        const insetR = Math.max(0, (vw - rect.right) + padR + marR);
-
-        // Prefer large, visible containers, and strongly prefer those with real insets (sidebar/padding).
-        const area = rect.width * rect.height;
-        const insetBonus = (insetL + insetR) * 2000;  // bias toward elements that "move" with sidebar
-        const score = area + insetBonus;
-
-        if (score > bestScore) {
-          bestScore = score;
-          best = el;
-        }
-      } catch (_) {}
+    if (!el) {
+      const fallback = [
+        ...this._queryDeep("ha-panel-lovelace"),
+      ];
+      el = this._findVisibleBest(fallback, predicate);
     }
 
-    this._contentEl = best || null;
+    this._contentEl = el || null;
 
-    if (!best || vw <= 0) {
+    if (!el || vw <= 0) {
       this._contentLeftMargin = 0;
       this._contentRightMargin = 0;
       return;
     }
 
-    const rect = best.getBoundingClientRect();
-    const style = window.getComputedStyle(best);
-    const padL = parseFloat(style.paddingLeft) || 0;
-    const padR = parseFloat(style.paddingRight) || 0;
-    const marL = parseFloat(style.marginLeft) || 0;
-    const marR = parseFloat(style.marginRight) || 0;
-
-    const nextL = Math.max(0, rect.left + padL + marL);
-    const nextR = Math.max(0, (vw - rect.right) + padR + marR);
-
-    this._contentLeftMargin = nextL;
-    this._contentRightMargin = nextR;
+    const rect = el.getBoundingClientRect();
+    this._contentLeftMargin = Math.max(0, rect.left);
+    this._contentRightMargin = Math.max(0, vw - rect.right);
   }
 
   _refreshUiState(forceRehook = false, softRehook = false) {
@@ -1028,9 +958,6 @@ class HkiNavigationCard extends LitElement {
             this._measureContentMargins();
             this.requestUpdate();
             this._scheduleMeasure();
-            this._scheduleMeasureBottomBar();
-            this._applyBottomInset();
-            this._bumpUiRecalc(10);
           });
           mo.observe(el, { attributes: true, attributeFilter: attrs.length ? attrs : undefined });
           this._uiObservers.push(mo);
@@ -1050,9 +977,6 @@ class HkiNavigationCard extends LitElement {
               this._measureContentMargins();
               this.requestUpdate();
               this._scheduleMeasure();
-              this._scheduleMeasureBottomBar();
-              this._applyBottomInset();
-              this._bumpUiRecalc(10);
             });
             ro.observe(el);
             this._resizeObservers.push(ro);
@@ -1324,6 +1248,7 @@ class HkiNavigationCard extends LitElement {
       ? c.bottom_bar_color.trim()
       : DEFAULTS.bottom_bar_color;
 
+    const opacity = Math.max(0, Math.min(1, clampNum(c.bottom_bar_opacity, DEFAULTS.bottom_bar_opacity)));
     const z = Math.max(0, (c.z_index || 0) - 1);
 
     const bottom = clampNum(c.bottom_bar_bottom_offset, DEFAULTS.bottom_bar_bottom_offset);
@@ -1332,44 +1257,54 @@ class HkiNavigationCard extends LitElement {
       ? c.bottom_bar_box_shadow.trim()
       : "";
 
+    const paddingLeft = Math.max(0, clampNum(c.bottom_bar_padding_left, DEFAULTS.bottom_bar_padding_left));
+    const paddingRight = Math.max(0, clampNum(c.bottom_bar_padding_right, DEFAULTS.bottom_bar_padding_right));
+    
+    const borderWidth = Math.max(0, clampNum(c.bottom_bar_border_width, DEFAULTS.bottom_bar_border_width));
+    const borderStyle = (typeof c.bottom_bar_border_style === "string" && c.bottom_bar_border_style.trim())
+      ? c.bottom_bar_border_style.trim()
+      : DEFAULTS.bottom_bar_border_style;
+    const borderColor = (typeof c.bottom_bar_border_color === "string" && c.bottom_bar_border_color.trim())
+      ? c.bottom_bar_border_color.trim()
+      : "";
+
     let left = 0;
-    let width = 0;
+    let right = 0;
 
     if (c.bottom_bar_full_width) {
-      left = 0;
-      width = window.innerWidth || document.documentElement.clientWidth || 0;
-      // Fallback if width is 0 for some reason
-      if (width <= 0) width = 999999;
+      left = paddingLeft;
+      right = paddingRight;
     } else {
-      // When not spanning full width, draw behind the bottom-most row of buttons.
-      // If bounds aren't ready yet, fall back to the Lovelace content width so *something* shows.
-      if (this._bottomBarBounds && this._bottomBarBounds.width > 0) {
-        left = this._bottomBarBounds.left;
-        width = this._bottomBarBounds.width;
-      } else {
-        const lm = this._contentLeftMargin || 0;
-        const rm = this._contentRightMargin || 0;
-        left = Math.max(0, Math.round(lm));
-        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-        width = Math.max(0, Math.round(vw - lm - rm));
-        if (width <= 0) return null;
+      // When not spanning full width, draw only behind the bottom-most row of buttons.
+      // If bounds aren't available yet, schedule a measurement and return null for now
+      if (!this._bottomBarBounds) {
+        this._scheduleMeasureBottomBar();
+        return null;
       }
+      left = this._bottomBarBounds.left + paddingLeft;
+      right = this._bottomBarBounds.right + paddingRight;
     }
 
     const styleParts = [
       `left:${left}px`,
-      `width:${width}px`,
+      `right:${right}px`,
       `bottom:${bottom}px`,
       `height:${height}px`,
       `background:${color}`,
+      `opacity:${opacity}`,
       `z-index:${z}`,
       `border-radius:${radius}px`,
-      shadow ? `box-shadow:${shadow}` : "",
-      "position:fixed",
-      "pointer-events:none",
-    ].filter(Boolean);
+    ];
+    
+    if (shadow) styleParts.push(`box-shadow:${shadow}`);
+    
+    if (borderWidth > 0 && borderColor) {
+      styleParts.push(`border: ${borderWidth}px ${borderStyle} ${borderColor}`);
+    }
 
-    return html`<div class="bottom-bar" style="${styleParts.join(";")}"></div>`;
+    return html`
+      <div class="bottom-bar" style="${styleParts.join(";")}"></div>
+    `;
   }
 
 
@@ -2692,6 +2627,9 @@ class HkiNavigationCardEditor extends LitElement {
 
         <ha-textfield
           type="number"
+          step="0.01"
+          min="0"
+          max="1"
           .label=${"Button background opacity override (0..1) — blank = inherit"}
           .value=${btn.background_opacity ?? ""}
           @change=${(e) => setBtnFn({ ...btn, background_opacity: e.target.value })}
@@ -3161,10 +3099,7 @@ class HkiNavigationCardEditor extends LitElement {
         <ha-alert alert-type="warning" class="doc">
           <div class="doc-title">Warning</div>
           <div>
-            This card uses fixed positions on the sections dashboard. If you need to edit it, remember where you have
-            placed this card so that you can find the edit button as it will stay on the location where you have put it.
-            It will be a transparent bar with an edit symbol which can be hard to find.<br><br>
-            It is recommended to put this either as first or as last card on your dashboard so you won't forget where the card is.<br><br>
+            This card uses fixed positions on your screen, to edit this card you will have to click on the placeholder card in the section where you have placed this card.<br><br>
             Please read the documentation at github.com/jimz011/hki-navigation-card to set up this card.<br><br>
             This card may contain bugs. Use at your own risk!
           </div>
@@ -3275,7 +3210,7 @@ class HkiNavigationCardEditor extends LitElement {
                 .value=${c.bottom_bar_box_shadow || ""}
                 ?disabled=${!c.bottom_bar_enabled}
                 @change=${(e) => this._setValue("bottom_bar_box_shadow", e.target.value)}
-              ></ha-textfield>
+              </ha-textfield>
 
               <ha-textfield
                 .label=${"Bottom bar color (CSS)"}
@@ -3284,8 +3219,59 @@ class HkiNavigationCardEditor extends LitElement {
                 @change=${(e) => this._setValue("bottom_bar_color", e.target.value)}
               ></ha-textfield>
 
+              <ha-textfield
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
+                .label=${"Bottom bar opacity (0..1)"}
+                .value=${String(c.bottom_bar_opacity ?? 1)}
+                ?disabled=${!c.bottom_bar_enabled}
+                @change=${(e) => this._setValue("bottom_bar_opacity", Number(e.target.value))}
+              ></ha-textfield>
+
+              <ha-textfield
+                type="number"
+                .label=${"Padding left (px)"}
+                .value=${String(c.bottom_bar_padding_left ?? 0)}
+                ?disabled=${!c.bottom_bar_enabled}
+                @change=${(e) => this._setValue("bottom_bar_padding_left", Number(e.target.value))}
+              ></ha-textfield>
+
+              <ha-textfield
+                type="number"
+                .label=${"Padding right (px)"}
+                .value=${String(c.bottom_bar_padding_right ?? 0)}
+                ?disabled=${!c.bottom_bar_enabled}
+                @change=${(e) => this._setValue("bottom_bar_padding_right", Number(e.target.value))}
+              ></ha-textfield>
+
+              <ha-textfield
+                type="number"
+                .label=${"Border width (px)"}
+                .value=${String(c.bottom_bar_border_width ?? 0)}
+                ?disabled=${!c.bottom_bar_enabled}
+                @change=${(e) => this._setValue("bottom_bar_border_width", Number(e.target.value))}
+              ></ha-textfield>
+
+              <ha-textfield
+                .label=${"Border style"}
+                .value=${c.bottom_bar_border_style || "solid"}
+                placeholder="solid, dashed, dotted, etc."
+                ?disabled=${!c.bottom_bar_enabled}
+                @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}
+              ></ha-textfield>
+
+              <ha-textfield
+                .label=${"Border color (CSS)"}
+                .value=${c.bottom_bar_border_color || ""}
+                placeholder="(optional)"
+                ?disabled=${!c.bottom_bar_enabled}
+                @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}
+              ></ha-textfield>
+
               <div class="hint">
-                Purely visual. It does not change offsets or click behavior—just draws a bar behind the buttons.
+                Purely visual. It does not change offsets or click behavior—just draws a bar behind the buttons. Padding adjusts the bar's horizontal span.
               </div>
             </div>
           </div>
@@ -3328,6 +3314,9 @@ class HkiNavigationCardEditor extends LitElement {
           </div>
 
           <div class="subsection">
+            <div class="hint" style="padding: 8px; background: rgba(255, 165, 0, 0.1); border-radius: 8px; border-left: 3px solid orange;">
+              ⚠️ Note: Global settings will only apply to buttons that have their values set to "inherit" (blank fields in button configuration).
+            </div>
             <div class="subheader">Defaults</div>
             <div class="grid2">
               <ha-select
@@ -3359,6 +3348,9 @@ class HkiNavigationCardEditor extends LitElement {
 
               <ha-textfield
                 type="number"
+                step="0.01"
+                min="0"
+                max="1"
                 .label=${"Default button background opacity (0..1)"}
                 .value=${String(c.default_button_opacity ?? 1)}
                 @change=${(e) => this._setDefaultButtonOpacity(e.target.value)}
