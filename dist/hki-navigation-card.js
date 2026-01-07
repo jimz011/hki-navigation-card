@@ -16,6 +16,10 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
+const VERSION = "1.0.0";
+
+// Log version once
+console.log(`%c${CARD_TYPE}%c v${VERSION}`, 'font-weight: bold; color: #00a8e8', 'color: #888');
 const CARD_TAG = "hki-navigation-card";
 const EDITOR_TAG = "hki-navigation-card-editor";
 
@@ -788,12 +792,6 @@ class HkiNavigationCard extends LitElement {
     
     if (!bottomRow.length) return;
 
-    console.log('[Bottom Bar] All bottom row buttons:', bottomRow.map(r => ({
-      left: Math.round(r.left),
-      right: Math.round(r.right),
-      width: Math.round(r.width)
-    })));
-
     // SIMPLE APPROACH FOR CENTER ALIGNMENT: Take buttons near the center
     // Center-aligned buttons should all be clustered near the middle of the viewport
     const centerX = vw / 2;
@@ -806,15 +804,6 @@ class HkiNavigationCard extends LitElement {
       return Math.abs(buttonCenterX - centerX) <= threshold;
     });
     
-    console.log('[Bottom Bar] Center alignment - viewport center:', Math.round(centerX));
-    console.log('[Bottom Bar] Threshold distance from center:', Math.round(threshold));
-    console.log('[Bottom Bar] Selected', mainCluster.length, 'buttons near center');
-    console.log('[Bottom Bar] Selected buttons:', mainCluster.map(r => ({
-      left: Math.round(r.left),
-      right: Math.round(r.right),
-      center: Math.round((r.left + r.right) / 2)
-    })));
-    
     if (!mainCluster.length) return;
     
     const minLeft = Math.min(...mainCluster.map((r) => r.left));
@@ -824,16 +813,6 @@ class HkiNavigationCard extends LitElement {
       left: Math.max(0, Math.round(minLeft)),
       right: Math.max(0, Math.round(vw - maxRight)),
     };
-    
-    // Debug logging
-    console.log('[Bottom Bar] ✅ FINAL RESULT:', {
-      position: c.position,
-      minLeft: Math.round(minLeft),
-      maxRight: Math.round(maxRight),
-      viewportWidth: vw,
-      barLeft: next.left,
-      barRight: next.right
-    });
 
     const cur = this._bottomBarBounds;
     const changed = !cur || cur.left !== next.left || cur.right !== next.right;
@@ -1321,15 +1300,6 @@ class HkiNavigationCard extends LitElement {
         // Positive margins EXTEND the bar beyond buttons
         const finalLeft = this._bottomBarBounds.left - marginLeft;
         const finalRight = this._bottomBarBounds.right - marginRight;
-        
-        console.log('[Bottom Bar] Positioning:', {
-          boundsLeft: this._bottomBarBounds.left,
-          boundsRight: this._bottomBarBounds.right,
-          marginLeft,
-          marginRight,
-          finalLeft,
-          finalRight
-        });
         
         styleParts.push(`left:${finalLeft}px`);
         styleParts.push(`right:${finalRight}px`);
