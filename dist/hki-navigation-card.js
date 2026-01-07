@@ -789,20 +789,36 @@ class HkiNavigationCard extends LitElement {
     let screenPositionFiltered;
     
     if (c.position === "bottom-right" || c.position === "bottom-center") {
-      // Only include buttons whose LEFT edge is in the right 60% of screen
-      const rightAreaThreshold = vw * 0.4; // Buttons must start after 40% of screen width
+      // Only include buttons whose LEFT edge is in the FAR RIGHT area (70% threshold)
+      const rightAreaThreshold = vw * 0.7; // Buttons must start after 70% of screen width
       screenPositionFiltered = bottomRow.filter((r) => r.left >= rightAreaThreshold);
       
-      console.log('[Bottom Bar] Right area threshold (40% of viewport):', Math.round(rightAreaThreshold));
+      console.log('[Bottom Bar] Right area threshold (70% of viewport):', Math.round(rightAreaThreshold));
       console.log('[Bottom Bar] Buttons in right area:', screenPositionFiltered.length);
       
+      // If no buttons found with 70% threshold, try 50%
+      if (!screenPositionFiltered.length) {
+        const fallbackThreshold = vw * 0.5;
+        screenPositionFiltered = bottomRow.filter((r) => r.left >= fallbackThreshold);
+        console.log('[Bottom Bar] No buttons at 70%, trying 50% threshold:', Math.round(fallbackThreshold));
+        console.log('[Bottom Bar] Buttons with fallback:', screenPositionFiltered.length);
+      }
+      
     } else if (c.position === "bottom-left") {
-      // Only include buttons whose RIGHT edge is in the left 60% of screen
-      const leftAreaThreshold = vw * 0.6; // Buttons must end before 60% of screen width
+      // Only include buttons whose RIGHT edge is in the FAR LEFT area (30% threshold)
+      const leftAreaThreshold = vw * 0.3; // Buttons must end before 30% of screen width
       screenPositionFiltered = bottomRow.filter((r) => r.right <= leftAreaThreshold);
       
-      console.log('[Bottom Bar] Left area threshold (60% of viewport):', Math.round(leftAreaThreshold));
+      console.log('[Bottom Bar] Left area threshold (30% of viewport):', Math.round(leftAreaThreshold));
       console.log('[Bottom Bar] Buttons in left area:', screenPositionFiltered.length);
+      
+      // If no buttons found with 30% threshold, try 50%
+      if (!screenPositionFiltered.length) {
+        const fallbackThreshold = vw * 0.5;
+        screenPositionFiltered = bottomRow.filter((r) => r.right <= fallbackThreshold);
+        console.log('[Bottom Bar] No buttons at 30%, trying 50% threshold:', Math.round(fallbackThreshold));
+        console.log('[Bottom Bar] Buttons with fallback:', screenPositionFiltered.length);
+      }
     } else {
       // Fallback
       screenPositionFiltered = bottomRow;
@@ -820,24 +836,24 @@ class HkiNavigationCard extends LitElement {
       // Find rightmost button in the filtered set
       const rightmost = screenPositionFiltered.reduce((max, r) => r.right > max.right ? r : max, screenPositionFiltered[0]);
       
-      // Include buttons within 400px of rightmost
-      const leftThreshold = rightmost.right - 400;
+      // Include buttons within 250px of rightmost (tighter clustering)
+      const leftThreshold = rightmost.right - 250;
       mainCluster = screenPositionFiltered.filter((r) => r.right >= leftThreshold);
       
       console.log('[Bottom Bar] Rightmost in filtered set:', Math.round(rightmost.right));
-      console.log('[Bottom Bar] Cluster threshold:', Math.round(leftThreshold));
+      console.log('[Bottom Bar] Cluster threshold (250px):', Math.round(leftThreshold));
       console.log('[Bottom Bar] Final cluster size:', mainCluster.length);
       
     } else if (c.position === "bottom-left") {
       // Find leftmost button in the filtered set
       const leftmost = screenPositionFiltered.reduce((min, r) => r.left < min.left ? r : min, screenPositionFiltered[0]);
       
-      // Include buttons within 400px of leftmost
-      const rightThreshold = leftmost.left + 400;
+      // Include buttons within 250px of leftmost (tighter clustering)
+      const rightThreshold = leftmost.left + 250;
       mainCluster = screenPositionFiltered.filter((r) => r.left <= rightThreshold);
       
       console.log('[Bottom Bar] Leftmost in filtered set:', Math.round(leftmost.left));
-      console.log('[Bottom Bar] Cluster threshold:', Math.round(rightThreshold));
+      console.log('[Bottom Bar] Cluster threshold (250px):', Math.round(rightThreshold));
       console.log('[Bottom Bar] Final cluster size:', mainCluster.length);
     } else {
       mainCluster = screenPositionFiltered;
@@ -3309,29 +3325,35 @@ class HkiNavigationCardEditor extends LitElement {
                 @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}
               ></ha-textfield>
 
-              <ha-textfield
-                type="number"
-                .label=${"Border width (px)"}
-                .value=${String(c.bottom_bar_border_width ?? 0)}
-                ?disabled=${!c.bottom_bar_enabled || c.bottom_bar_full_width}
-                @change=${(e) => this._setValue("bottom_bar_border_width", Number(e.target.value))}
-              ></ha-textfield>
+              ${!c.bottom_bar_full_width ? html`
+                <ha-textfield
+                  type="number"
+                  .label=${"Border width (px)"}
+                  .value=${String(c.bottom_bar_border_width ?? 0)}
+                  ?disabled=${!c.bottom_bar_enabled}
+                  @change=${(e) => this._setValue("bottom_bar_border_width", Number(e.target.value))}
+                ></ha-textfield>
+              ` : ''}
 
-              <ha-textfield
-                .label=${"Border style"}
-                .value=${c.bottom_bar_border_style || "solid"}
-                placeholder="solid, dashed, dotted, etc."
-                ?disabled=${!c.bottom_bar_enabled || c.bottom_bar_full_width}
-                @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}
-              ></ha-textfield>
+              ${!c.bottom_bar_full_width ? html`
+                <ha-textfield
+                  .label=${"Border style"}
+                  .value=${c.bottom_bar_border_style || "solid"}
+                  placeholder="solid, dashed, dotted, etc."
+                  ?disabled=${!c.bottom_bar_enabled}
+                  @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}
+                ></ha-textfield>
+              ` : ''}
 
-              <ha-textfield
-                .label=${"Border color (CSS)"}
-                .value=${c.bottom_bar_border_color || ""}
-                placeholder="(optional)"
-                ?disabled=${!c.bottom_bar_enabled || c.bottom_bar_full_width}
-                @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}
-              ></ha-textfield>
+              ${!c.bottom_bar_full_width ? html`
+                <ha-textfield
+                  .label=${"Border color (CSS)"}
+                  .value=${c.bottom_bar_border_color || ""}
+                  placeholder="(optional)"
+                  ?disabled=${!c.bottom_bar_enabled}
+                  @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}
+                ></ha-textfield>
+              ` : ''}
 
               <div class="hint">
                 Purely visual. The bar follows button alignment. Use margins to adjust horizontal span. Does not affect click behavior.
