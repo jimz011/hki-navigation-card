@@ -389,81 +389,11 @@ const DEFAULT_BUTTON = () => ({
   double_tap_action: { action: "none" },
 });
 
-const LAYOUT_PRESETS = {
-  "minimal-right": {
-    name: "Minimal Right Corner",
-    config: {
-      position: "bottom-right",
-      offset_x: 12,
-      offset_y: 20,
-      button_size: 50,
-      gap: 12,
-      vertical_gap: 12,
-      z_index: 5,
-      button_box_shadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
-      button_box_shadow_hover: "0 10px 30px rgba(0, 0, 0, 0.42)",
-      default_button_type: "icon",
-      horizontal: {
-        enabled: true,
-        columns: 6,
-        buttons: [
-          {
-            icon: "mdi:floor-plan",
-            tooltip: "",
-            tap_action: { action: "navigate", navigation_path: "/" }
-          },
-          {
-            icon: "mdi:view-grid",
-            tooltip: "Overview",
-            tap_action: { action: "navigate", navigation_path: "/" }
-          }
-        ]
-      },
-      vertical: {
-        enabled: false,
-        rows: 6,
-        buttons: []
-      },
-      center_spread: false,
-      offset_x_mobile: null,
-      offset_x_tablet: null,
-      offset_x_desktop: null,
-      bottom_bar_enabled: false,
-      bottom_bar_height: 85,
-      bottom_bar_color: "rgb(var(--rgb-card-background-color, 0,0,0))",
-      bottom_bar_opacity: 0.85,
-      bottom_bar_full_width: true,
-      bottom_bar_border_radius: 0,
-      bottom_bar_box_shadow: "",
-      bottom_bar_bottom_offset: 0,
-      bottom_bar_margin_left: 0,
-      bottom_bar_margin_right: 0,
-      bottom_bar_border_width: 0,
-      bottom_bar_border_style: "solid",
-      bottom_bar_border_color: "",
-      label_style: {
-        font_size: 12,
-        font_weight: 600,
-        letter_spacing: 0,
-        text_transform: "none",
-        color: "",
-        background: "",
-        background_opacity: 0.72,
-        padding_x: 10,
-        padding_y: 6,
-        border_radius: 999,
-        backdrop_blur: 8,
-        max_width: 220
-      }
-    }
-  }
-};
-
 const DEFAULTS = {
   type: `custom:${CARD_TYPE}`,
 
   position: "bottom-right",
-  offset_x: 70,
+  offset_x: 12,
   offset_y: 20,
   button_size: 50,
   gap: 12,
@@ -506,8 +436,8 @@ const DEFAULTS = {
   bottom_bar_border_radius: 0,
   bottom_bar_box_shadow: "",
   bottom_bar_bottom_offset: 0,
-  bottom_bar_margin_left: 15,
-  bottom_bar_margin_right: 15,
+  bottom_bar_margin_left: 0,
+  bottom_bar_margin_right: 0,
   bottom_bar_border_width: 0,
   bottom_bar_border_style: "solid",
   bottom_bar_border_color: "",
@@ -2169,39 +2099,6 @@ class HkiNavigationCardEditor extends LitElement {
     this._emit(cfg);
   }
 
-  _applyPreset(presetKey) {
-    if (!presetKey || presetKey === "") return;
-    
-    const preset = LAYOUT_PRESETS[presetKey];
-    if (!preset) return;
-    
-    const cfg = deepClone(this._c);
-    
-    // Apply preset config, but preserve existing buttons if any
-    Object.assign(cfg, preset.config);
-    
-    // Ensure button IDs are valid
-    if (cfg.horizontal?.buttons) {
-      cfg.horizontal.buttons = cfg.horizontal.buttons.map(btn => ({
-        ...createButtonDefaults(),
-        ...btn,
-        id: btn.id || generateId()
-      }));
-    }
-    if (cfg.vertical?.buttons) {
-      cfg.vertical.buttons = cfg.vertical.buttons.map(btn => ({
-        ...createButtonDefaults(),
-        ...btn,
-        id: btn.id || generateId()
-      }));
-    }
-    if (cfg.base?.button && !cfg.base.button.id) {
-      cfg.base.button.id = generateId();
-    }
-    
-    this._emit(cfg);
-  }
-
   _setLabelStyleGlobal(key, value) {
     this._applyGlobalAndClearOverrides(`label_style.${key}`, (cfg) => {
       cfg.label_style = cfg.label_style || {};
@@ -3258,27 +3155,6 @@ class HkiNavigationCardEditor extends LitElement {
 
           <div class="grid2">
             <ha-select
-              .label=${"Layout Preset"}
-              .value=${""}
-              @selected=${(e) => {
-                const presetKey = e.target.value;
-                if (presetKey && presetKey !== "") {
-                  this._applyPreset(presetKey);
-                  // Reset dropdown to empty after applying
-                  setTimeout(() => { e.target.value = ""; }, 100);
-                }
-              }}
-              @closed=${(e) => e.stopPropagation()}
-            >
-              <mwc-list-item value="">-- Select a preset --</mwc-list-item>
-              <mwc-list-item value="minimal-right">Minimal Right Corner</mwc-list-item>
-            </ha-select>
-
-            <div class="hint" style="grid-column: 1/-1; margin: -8px 0 8px 0;">
-              Apply a pre-configured layout. This will override your current settings.
-            </div>
-
-            <ha-select
               .label=${"Position"}
               .value=${c.position}
               @selected=${(e) => this._setValue("position", e.target.value)}
@@ -3458,16 +3334,16 @@ class HkiNavigationCardEditor extends LitElement {
 
               <ha-textfield
                 type="number"
-                .label=${"Extend left (px)"}
-                .value=${String(c.bottom_bar_margin_left ?? 15)}
+                .label=${"Inset left (px)"}
+                .value=${String(c.bottom_bar_margin_left ?? 0)}
                 
                 @change=${(e) => this._setValue("bottom_bar_margin_left", Number(e.target.value))}
               ></ha-textfield>
 
               <ha-textfield
                 type="number"
-                .label=${"Extend right (px)"}
-                .value=${String(c.bottom_bar_margin_right ?? 15)}
+                .label=${"Inset right (px)"}
+                .value=${String(c.bottom_bar_margin_right ?? 0)}
                 
                 @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}
               ></ha-textfield>
@@ -3503,7 +3379,7 @@ class HkiNavigationCardEditor extends LitElement {
               ` : ''}
 
               <div class="hint">
-                Purely visual. The bar wraps buttons (center alignment only) or spans full width (left/right). Positive extend values make the bar wider, negative values make it narrower. Default: 15px on each side. Does not affect click behavior.
+                Purely visual. The bar wraps buttons (center alignment only) or spans full width (left/right). Positive inset values extend the bar beyond buttons when wrapping, or shrink it when full-width is enabled. Negative values do the opposite. Does not affect click behavior.
               </div>
               ` : ''}
             </div>
