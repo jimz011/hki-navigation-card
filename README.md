@@ -1,8 +1,10 @@
 # HKI Navigation Card
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/jimz011/hki-navigation-card)
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Downloads](https://img.shields.io/github/downloads/jimz011/hki-navigation-card/total.svg)](https://github.com/jimz011/hki-navigation-card/releases)
+[![Maintained](https://img.shields.io/badge/Maintained-Yes-green.svg)](https://github.com/jimz011/hki-navigation-card/graphs/commit-activity)
 
 A modern, highly customizable navigation card for Home Assistant with fixed-position buttons and advanced styling options.
 
@@ -17,7 +19,6 @@ A modern, highly customizable navigation card for Home Assistant with fixed-posi
 - 📱 **Responsive design** - Automatic sidebar detection and responsive positioning
 - 🎯 **Multiple layouts** - Corner, center, and spread positioning options
 - 🔄 **Dynamic visibility** - Show/hide buttons based on conditions
-- ⚡ **Template support** - Use Jinja2 templates for dynamic content
 - 🎭 **Advanced styling** - Custom colors, shadows, backgrounds, and more
 
 ### Button Features
@@ -68,13 +69,22 @@ A modern, highly customizable navigation card for Home Assistant with fixed-posi
 ## ⚡ Quick Start
 
 ### Installation via HACS (Recommended)
-
-1. Open HACS in Home Assistant
-2. Click on "Frontend"
-3. Click the "+" button in the bottom right
-4. Search for "HKI Navigation Card"
-5. Click "Download"
+1. Open HACS in your Home Assistant instance
+2. Go to "Frontend"
+3. Click the menu in the top right and select "Custom repositories"
+4. Add `https://github.com/jimz011/hki-navigation-card` as a Lovelace repository
+5. Click "Download" on the HKI Header Card
 6. Restart Home Assistant
+
+### Manual Installation
+1. Download `hki-navigation-card.js` from the [latest release](https://github.com/jimz011/hki-header-card/releases)
+2. Copy it to `<config>/www/` (create the folder if it doesn't exist)
+3. Add the resource in your Lovelace configuration:
+```yaml
+   resources:
+     - url: /local/hki-navigation-card.js
+       type: module
+```
 
 ### Basic Configuration
 
@@ -212,18 +222,6 @@ See the [Button Configuration Guide](docs/buttons.md) for details.
 
 ## 🚀 Advanced Features
 
-### Templates
-Use Jinja2 templates for dynamic content:
-
-```yaml
-buttons:
-  - icon: mdi:lightbulb
-    label: >-
-      {{ states('sensor.lights_on') }} lights on
-    tooltip: >-
-      {% if is_state('light.living_room', 'on') %}Turn off{% else %}Turn on{% endif %}
-```
-
 ### Conditions
 Show/hide buttons based on state:
 
@@ -319,8 +317,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 If you find this card useful, consider supporting development:
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-yellow.svg)](https://www.buymeacoffee.com/YOUR_USERNAME)
-[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue.svg)](https://paypal.me/YOUR_USERNAME)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-yellow.svg)](https://www.buymeacoffee.com/w8Jnf6Hit)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue.svg)](https://paypal.me/JimmySchings)
 
 ---
 
@@ -349,8 +347,8 @@ This card was inspired by:
 
 ## 📱 Related Projects
 
-- [Homekit Infused](https://github.com/jimz011/homekit-infused) - Complete dashboard framework
 - [HKI Header Card](https://github.com/jimz011/hki-header-card) - Companion header card
+- [Homekit Infused](https://github.com/jimz011/homekit-infused) - Complete dashboard framework
 
 ---
 
