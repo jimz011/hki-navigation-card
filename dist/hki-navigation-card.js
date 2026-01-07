@@ -779,21 +779,54 @@ class HkiNavigationCard extends LitElement {
     
     if (!bottomRow.length) return;
 
-    // Find the rightmost button in the bottom row
-    const maxRight = Math.max(...bottomRow.map((r) => r.right));
+    // Sort buttons by position
+    bottomRow.sort((a, b) => {
+      if (c.position === "bottom-left") return a.left - b.left;
+      return b.right - a.right; // Sort right-to-left for right alignment
+    });
+
+    // Find main cluster by detecting gaps
+    // Buttons in a cluster should be within ~150px of each other
+    const gapThreshold = 150;
+    const mainCluster = [bottomRow[0]];
     
-    // For alignment-based layouts, filter to buttons in the main cluster
-    // Only include buttons within 20% of viewport width of the rightmost button
-    const rightThreshold = maxRight - (vw * 0.2);
-    const mainCluster = bottomRow.filter((r) => r.right >= rightThreshold);
+    for (let i = 1; i < bottomRow.length; i++) {
+      const prev = mainCluster[mainCluster.length - 1];
+      const curr = bottomRow[i];
+      
+      let gap;
+      if (c.position === "bottom-left") {
+        // For left-aligned, check gap between right edge of prev and left edge of curr
+        gap = curr.left - prev.right;
+      } else {
+        // For right-aligned, check gap between right edge of curr and left edge of prev
+        gap = prev.left - curr.right;
+      }
+      
+      if (gap <= gapThreshold) {
+        mainCluster.push(curr);
+      } else {
+        // Found a large gap, stop here
+        break;
+      }
+    }
     
     const minLeft = Math.min(...mainCluster.map((r) => r.left));
-    const finalMaxRight = Math.max(...mainCluster.map((r) => r.right));
+    const maxRight = Math.max(...mainCluster.map((r) => r.right));
 
     const next = {
       left: Math.max(0, Math.round(minLeft)),
-      right: Math.max(0, Math.round(vw - finalMaxRight)),
+      right: Math.max(0, Math.round(vw - maxRight)),
     };
+    
+    // Debug logging
+    console.log('[Bottom Bar] Measured cluster:', {
+      buttons: mainCluster.length,
+      minLeft,
+      maxRight,
+      viewportWidth: vw,
+      result: next
+    });
 
     const cur = this._bottomBarBounds;
     const changed = !cur || cur.left !== next.left || cur.right !== next.right;
@@ -1228,7 +1261,8 @@ class HkiNavigationCard extends LitElement {
       : DEFAULTS.bottom_bar_color;
 
     const opacity = Math.max(0, Math.min(1, clampNum(c.bottom_bar_opacity, DEFAULTS.bottom_bar_opacity)));
-    const z = Math.max(0, (c.z_index || 0) - 1);
+    // Z-index: 1 = above content, but below sidebar (which is typically 100+)
+    const z = 1;
     const bottom = clampNum(c.bottom_bar_bottom_offset, DEFAULTS.bottom_bar_bottom_offset);
     const radius = Math.max(0, clampNum(c.bottom_bar_border_radius, DEFAULTS.bottom_bar_border_radius));
     const shadow = (typeof c.bottom_bar_box_shadow === "string" && c.bottom_bar_box_shadow.trim())
@@ -1274,8 +1308,20 @@ class HkiNavigationCard extends LitElement {
       if (this._bottomBarBounds) {
         // Position bar using measured button bounds
         // _bottomBarBounds.left is px from left edge, .right is px from right edge
-        styleParts.push(`left:${this._bottomBarBounds.left + marginLeft}px`);
-        styleParts.push(`right:${this._bottomBarBounds.right + marginRight}px`);
+        const finalLeft = this._bottomBarBounds.left + marginLeft;
+        const finalRight = this._bottomBarBounds.right + marginRight;
+        
+        console.log('[Bottom Bar] Positioning:', {
+          boundsLeft: this._bottomBarBounds.left,
+          boundsRight: this._bottomBarBounds.right,
+          marginLeft,
+          marginRight,
+          finalLeft,
+          finalRight
+        });
+        
+        styleParts.push(`left:${finalLeft}px`);
+        styleParts.push(`right:${finalRight}px`);
       } else {
         // Fallback position while measuring
         const offsetX = this._computeOffsetX();
