@@ -436,8 +436,8 @@ const DEFAULTS = {
   bottom_bar_border_radius: 0,
   bottom_bar_box_shadow: "",
   bottom_bar_bottom_offset: 0,
-  bottom_bar_margin_left: 0,
-  bottom_bar_margin_right: 0,
+  bottom_bar_margin_left: 15,
+  bottom_bar_margin_right: 15,
   bottom_bar_border_width: 0,
   bottom_bar_border_style: "solid",
   bottom_bar_border_color: "",
@@ -559,8 +559,8 @@ function normalizeConfig(cfg) {
   c.bottom_bar_border_radius = Math.max(0, clampNum(raw.bottom_bar_border_radius, DEFAULTS.bottom_bar_border_radius));
   c.bottom_bar_bottom_offset = clampNum(raw.bottom_bar_bottom_offset, DEFAULTS.bottom_bar_bottom_offset);
   c.bottom_bar_box_shadow = (typeof raw.bottom_bar_box_shadow === "string") ? raw.bottom_bar_box_shadow : DEFAULTS.bottom_bar_box_shadow;
-  c.bottom_bar_margin_left = Math.max(0, clampNum(raw.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left));
-  c.bottom_bar_margin_right = Math.max(0, clampNum(raw.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right));
+  c.bottom_bar_margin_left = clampNum(raw.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left);
+  c.bottom_bar_margin_right = clampNum(raw.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right);
   c.bottom_bar_border_width = Math.max(0, clampNum(raw.bottom_bar_border_width, DEFAULTS.bottom_bar_border_width));
   c.bottom_bar_border_style = (typeof raw.bottom_bar_border_style === "string") ? raw.bottom_bar_border_style : DEFAULTS.bottom_bar_border_style;
   c.bottom_bar_border_color = (typeof raw.bottom_bar_border_color === "string") ? raw.bottom_bar_border_color : DEFAULTS.bottom_bar_border_color;
@@ -1311,8 +1311,9 @@ class HkiNavigationCard extends LitElement {
       if (this._bottomBarBounds) {
         // Position bar using measured button bounds
         // _bottomBarBounds.left is px from left edge, .right is px from right edge
-        const finalLeft = this._bottomBarBounds.left + marginLeft;
-        const finalRight = this._bottomBarBounds.right + marginRight;
+        // Positive margins EXTEND the bar beyond buttons
+        const finalLeft = this._bottomBarBounds.left - marginLeft;
+        const finalRight = this._bottomBarBounds.right - marginRight;
         
         console.log('[Bottom Bar] Positioning:', {
           boundsLeft: this._bottomBarBounds.left,
@@ -1328,8 +1329,8 @@ class HkiNavigationCard extends LitElement {
       } else {
         // Fallback position while measuring
         const offsetX = this._computeOffsetX();
-        styleParts.push(`left:${offsetX + marginLeft}px`);
-        styleParts.push(`right:${offsetX + marginRight}px`);
+        styleParts.push(`left:${offsetX - marginLeft}px`);
+        styleParts.push(`right:${offsetX - marginRight}px`);
       }
     }
 
@@ -3269,16 +3270,16 @@ class HkiNavigationCardEditor extends LitElement {
 
               <ha-textfield
                 type="number"
-                .label=${"Margin left (px)"}
-                .value=${String(c.bottom_bar_margin_left ?? 0)}
+                .label=${"Extend left (px)"}
+                .value=${String(c.bottom_bar_margin_left ?? 15)}
                 
                 @change=${(e) => this._setValue("bottom_bar_margin_left", Number(e.target.value))}
               ></ha-textfield>
 
               <ha-textfield
                 type="number"
-                .label=${"Margin right (px)"}
-                .value=${String(c.bottom_bar_margin_right ?? 0)}
+                .label=${"Extend right (px)"}
+                .value=${String(c.bottom_bar_margin_right ?? 15)}
                 
                 @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}
               ></ha-textfield>
@@ -3314,7 +3315,7 @@ class HkiNavigationCardEditor extends LitElement {
               ` : ''}
 
               <div class="hint">
-                Purely visual. The bar follows button alignment. Use margins to adjust horizontal span. Does not affect click behavior.
+                Purely visual. The bar wraps buttons (center alignment only) or spans full width (left/right). Positive extend values make the bar wider, negative values make it narrower. Default: 15px on each side. Does not affect click behavior.
               </div>
               ` : ''}
             </div>
