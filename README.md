@@ -12,6 +12,7 @@ The options are endless and therefor this documentation might not be complete, m
 ***NOTE: This card may contain bugs***
 
 ***You may also be interested in [HKI Header Card](https://github.com/jimz011/hki-header-card) and [HKI PostNL Card](https://github.com/jimz011/hki-postnl-card)***
+
 ---
 ## 📸 Screenshots
 
