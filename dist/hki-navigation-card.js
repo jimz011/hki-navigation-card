@@ -16,13 +16,12 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const EDITOR_TAG = "hki-navigation-card-editor";
+const VERSION = "1.0.0";
 
-console.info(
-  '%c HKI-NAVIGATION-CARD %c v1.0.1 ',
-  'color: white; background: #2e7d32; font-weight: bold;',
-  'color: #2e7d32; background: white; font-weight: bold;'
-);
+// Log version once
+console.log(`%c${CARD_TYPE} %cv${VERSION}`, 'color: #17a2b8', 'color: #999');
+const CARD_TAG = "hki-navigation-card";
+const EDITOR_TAG = "hki-navigation-card-editor";
 
 const INHERIT = "__inherit__";
 const MIN_PILL_WIDTH = 85;
@@ -101,15 +100,14 @@ const DEFAULT_LABEL_STYLE = {
   max_width: 220,
 };
 
-// Pre-compute button type values for faster lookup
-const BUTTON_TYPE_VALUES = new Set(BUTTON_TYPES.map(t => t.value));
-
 function _uid() {
-  return window.crypto?.randomUUID?.() ?? `id_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `id_${Date.now()}_${Math.floor(Math.random() * 1e9)}`;
 }
 
 function safeString(v) {
-  return v == null ? "" : String(v);
+  if (v === null || v === undefined) return "";
+  return String(v);
 }
 
 function deepClone(obj) {
@@ -123,7 +121,8 @@ function clampNum(v, fallback) {
 
 function clampInt(v, fallback, min = 0) {
   const n = Number(v);
-  return Number.isFinite(n) ? Math.max(min, Math.trunc(n)) : fallback;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.trunc(n));
 }
 
 function fireEvent(node, type, detail, options = {}) {
@@ -137,17 +136,20 @@ function fireEvent(node, type, detail, options = {}) {
 }
 
 function _hasMeaningfulNumber(x) {
-  if (x == null) return false;
+  if (x === undefined || x === null) return false;
   if (typeof x === "number") return Number.isFinite(x);
   if (typeof x === "string") {
     const t = x.trim();
-    return t !== "" && Number.isFinite(Number(t));
+    if (t === "") return false;
+    const n = Number(t);
+    return Number.isFinite(n);
   }
   return false;
 }
-
 function _toNumber(x) {
-  return typeof x === "number" ? x : Number(String(x).trim());
+  if (typeof x === "number") return x;
+  if (typeof x === "string") return Number(x.trim());
+  return NaN;
 }
 
 function normalizeLabelStyle(style) {
@@ -172,10 +174,8 @@ function mergeLabelStyle(globalStyle, buttonStyle) {
   const g = normalizeLabelStyle(globalStyle);
   const b = buttonStyle && typeof buttonStyle === "object" ? buttonStyle : {};
 
-  const pickStr = (key) => {
-    const val = b[key];
-    return typeof val === "string" && val.trim() !== "" ? val : g[key];
-  };
+  const pickStr = (key) =>
+    typeof b[key] === "string" && b[key].trim() !== "" ? b[key] : g[key];
 
   const pickNum = (key) =>
     _hasMeaningfulNumber(b[key]) ? _toNumber(b[key]) : g[key];
@@ -197,12 +197,14 @@ function mergeLabelStyle(globalStyle, buttonStyle) {
 }
 
 function normalizeButtonType(type, fallback) {
-  return BUTTON_TYPE_VALUES.has(type) ? type : fallback;
+  if (BUTTON_TYPES.some((t) => t.value === type)) return type;
+  return fallback;
 }
 
-/* -------------------- Minimal YAML parser -------------------- */
+/* -------------------- Minimal YAML parser (no external deps) -------------------- */
 function _stripYamlComment(line) {
-  let inS = false, inD = false;
+  let inS = false;
+  let inD = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (ch === "'" && !inD) inS = !inS;
@@ -216,8 +218,10 @@ function _parseScalar(raw) {
   const s = raw.trim();
   if (s === "") return null;
 
-  if ((s[0] === "{" && s[s.length - 1] === "}") || (s[0] === "[" && s[s.length - 1] === "]")) {
-    try { return JSON.parse(s); } catch (_) {}
+  if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
+    try {
+      return JSON.parse(s);
+    } catch (_) {}
   }
 
   const lower = s.toLowerCase();
@@ -230,7 +234,7 @@ function _parseScalar(raw) {
     if (Number.isFinite(n)) return n;
   }
 
-  if ((s[0] === '"' && s[s.length - 1] === '"') || (s[0] === "'" && s[s.length - 1] === "'")) {
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
     return s.slice(1, -1);
   }
 
@@ -240,11 +244,10 @@ function _parseScalar(raw) {
 function parseYamlLite(yamlStr) {
   const src = safeString(yamlStr);
   const lines = src.split("\n");
-  const lineCount = lines.length;
 
-  const nextNonEmpty = new Array(lineCount).fill(-1);
+  const nextNonEmpty = new Array(lines.length).fill(-1);
   let next = -1;
-  for (let i = lineCount - 1; i >= 0; i--) {
+  for (let i = lines.length - 1; i >= 0; i--) {
     const l = _stripYamlComment(lines[i]).trim();
     if (l !== "") next = i;
     nextNonEmpty[i] = next;
@@ -262,7 +265,7 @@ function parseYamlLite(yamlStr) {
     return parent[key];
   };
 
-  for (let i = 0; i < lineCount; i++) {
+  for (let i = 0; i < lines.length; i++) {
     let rawLine = _stripYamlComment(lines[i]);
     if (!rawLine.trim()) continue;
 
@@ -272,7 +275,7 @@ function parseYamlLite(yamlStr) {
     popToIndent(indent);
     const top = stack[stack.length - 1];
 
-    if (line[0] === "-") {
+    if (line.startsWith("-")) {
       if (top.kind !== "list") {
         if (stack.length === 1) {
           stack[0] = { indent: -1, kind: "list", value: [] };
@@ -282,14 +285,14 @@ function parseYamlLite(yamlStr) {
       }
 
       const list = stack[stack.length - 1].value;
-      const itemRest = line.slice(1).trim();
+      const itemRest = line.replace(/^-/, "").trim();
 
       if (itemRest === "") {
         const ni = nextNonEmpty[i];
         const nextLine = ni >= 0 ? _stripYamlComment(lines[ni]).trim() : "";
         const nextIndent = ni >= 0 ? _stripYamlComment(lines[ni]).match(/^\s*/)[0].length : -1;
 
-        if (ni >= 0 && nextIndent > indent && nextLine[0] === "-") {
+        if (ni >= 0 && nextIndent > indent && nextLine.startsWith("-")) {
           const child = [];
           list.push(child);
           stack.push({ indent, kind: "list", value: child });
@@ -313,7 +316,7 @@ function parseYamlLite(yamlStr) {
           const nextIndent = ni >= 0 ? _stripYamlComment(lines[ni]).match(/^\s*/)[0].length : -1;
 
           const child = {};
-          child[k] = (ni >= 0 && nextIndent > indent && nextLine[0] === "-") ? [] : {};
+          child[k] = (ni >= 0 && nextIndent > indent && nextLine.startsWith("-")) ? [] : {};
           list.push(child);
           stack.push({ indent, kind: "map", value: child });
           stack.push({ indent: indent + 2, kind: Array.isArray(child[k]) ? "list" : "map", value: child[k] });
@@ -333,7 +336,7 @@ function parseYamlLite(yamlStr) {
     if (idx === -1) throw new Error(`YAML: expected "key: value" but got "${line}"`);
 
     const key = line.slice(0, idx).trim();
-    const vRaw = line.slice(idx + 1).trim();
+    let vRaw = line.slice(idx + 1).trim();
 
     if (stack[stack.length - 1].kind !== "map") {
       throw new Error("YAML: mapping entry found where a list was expected.");
@@ -346,7 +349,7 @@ function parseYamlLite(yamlStr) {
       const nextLine = ni >= 0 ? _stripYamlComment(lines[ni]).trim() : "";
       const nextIndent = ni >= 0 ? _stripYamlComment(lines[ni]).match(/^\s*/)[0].length : -1;
 
-      if (ni >= 0 && nextIndent > indent && nextLine[0] === "-") {
+      if (ni >= 0 && nextIndent > indent && nextLine.startsWith("-")) {
         const child = ensureContainerForKey(map, key, "list");
         stack.push({ indent: indent + 2, kind: "list", value: child });
       } else if (ni >= 0 && nextIndent > indent) {
@@ -360,7 +363,8 @@ function parseYamlLite(yamlStr) {
     }
   }
 
-  return Array.isArray(stack[0].value) ? stack[0].value : root;
+  if (Array.isArray(stack[0].value)) return stack[0].value;
+  return root;
 }
 
 /* -------------------------- Defaults -------------------------- */
@@ -371,14 +375,19 @@ const DEFAULT_BUTTON = () => ({
   tooltip: "",
   label: "",
   entity: "",
+
   button_type: "",
+
   background: "",
   background_opacity: "",
   icon_color: "",
+
   label_style: {},
   pill_width: "",
+
   conditions_mode: "all",
   conditions: [],
+
   tap_action: { action: "navigate", navigation_path: "/" },
   hold_action: { action: "none" },
   double_tap_action: { action: "none" },
@@ -386,6 +395,7 @@ const DEFAULT_BUTTON = () => ({
 
 const DEFAULTS = {
   type: `custom:${CARD_TYPE}`,
+
   position: "bottom-right",
   offset_x: 12,
   offset_y: 20,
@@ -393,25 +403,39 @@ const DEFAULTS = {
   gap: 12,
   vertical_gap: 12,
   z_index: 5,
+
   base: { button: DEFAULT_BUTTON() },
+
   horizontal: { enabled: true, columns: 6, buttons: [] },
   vertical: { enabled: false, rows: 6, buttons: [] },
+
   default_background: "",
   default_button_opacity: 1,
   default_icon_color: "",
+
+
+  // Button shadows (CSS). Leave blank to use built-in defaults.
   button_box_shadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
   button_box_shadow_hover: "0 10px 30px rgba(0, 0, 0, 0.42)",
   default_button_type: "icon",
+
   label_style: { ...DEFAULT_LABEL_STYLE },
+
   pill_width: 0,
+
   center_spread: false,
-  offset_x_mobile: null,
-  offset_x_tablet: null,
-  offset_x_desktop: null,
+
+  // Screen-size-based offsets (optional overrides for base offset_x)
+  offset_x_mobile: null,      // < 768px - null means use base offset_x
+  offset_x_tablet: null,      // 768px - 1024px - null means use base offset_x
+  offset_x_desktop: null,     // > 1024px - null means use base offset_x
+
+  // Cosmetic bottom bar behind buttons
   bottom_bar_enabled: false,
   bottom_bar_height: 85,
   bottom_bar_color: "rgb(var(--rgb-card-background-color, 0,0,0))",
   bottom_bar_opacity: 0.85,
+  // When true, the bar spans the entire viewport width. When false, it follows button position.
   bottom_bar_full_width: false,
   bottom_bar_border_radius: 0,
   bottom_bar_box_shadow: "",
@@ -421,6 +445,9 @@ const DEFAULTS = {
   bottom_bar_border_width: 0,
   bottom_bar_border_style: "solid",
   bottom_bar_border_color: "",
+  buttons: undefined,
+  default_label_position: undefined,
+  default_show_label: undefined,
 };
 
 function ensureButtonIdsInList(list) {
@@ -447,7 +474,10 @@ function ensureConditionIdsInList(list) {
     const nextConds = conds.map((c) => {
       if (!c || typeof c !== "object") return c;
       const cc = { ...c };
-      if (!cc.id) { cc.id = _uid(); local = true; }
+      if (!cc.id) {
+        cc.id = _uid();
+        local = true;
+      }
       if (!cc.type) cc.type = "entity";
       return cc;
     });
@@ -462,7 +492,7 @@ function ensureConditionIdsInList(list) {
 }
 
 function inferButtonTypeFromLegacy(btn, configDefaultType) {
-  if (btn?.button_type && BUTTON_TYPE_VALUES.has(btn.button_type)) return btn.button_type;
+  if (btn?.button_type && BUTTON_TYPES.some((t) => t.value === btn.button_type)) return btn.button_type;
 
   const lp = btn?.label_position;
   if (lp === "inside") return "pill";
@@ -494,7 +524,8 @@ function normalizeConfig(cfg) {
     (Array.isArray(vertical.buttons) && vertical.buttons.length > 0);
 
   if (!hasNewLists && Array.isArray(raw.buttons)) {
-    const h = [], v = [];
+    const h = [];
+    const v = [];
     for (const b of raw.buttons) {
       if (b?.group === "vertical") v.push({ ...b });
       else h.push({ ...b });
@@ -512,29 +543,35 @@ function normalizeConfig(cfg) {
   };
 
   c.position = ["bottom-left", "bottom-center", "bottom-right"].includes(c.position) ? c.position : "bottom-right";
+
   c.offset_x = clampNum(c.offset_x, DEFAULTS.offset_x);
   c.offset_y = clampNum(c.offset_y, DEFAULTS.offset_y);
   c.button_size = Math.max(36, clampNum(c.button_size, DEFAULTS.button_size));
   c.gap = Math.max(0, clampNum(c.gap, DEFAULTS.gap));
+
+  // vertical gap defaults to gap if missing
   c.vertical_gap = Math.max(0, clampNum(c.vertical_gap, c.gap));
+
   c.z_index = clampNum(c.z_index, DEFAULTS.z_index);
 
+  // Cosmetic bottom bar
   c.bottom_bar_enabled = !!raw.bottom_bar_enabled;
   c.bottom_bar_full_width = !!raw.bottom_bar_full_width;
   c.bottom_bar_height = Math.max(0, clampInt(raw.bottom_bar_height, DEFAULTS.bottom_bar_height, 0));
-  c.bottom_bar_color = typeof raw.bottom_bar_color === "string" ? raw.bottom_bar_color : DEFAULTS.bottom_bar_color;
+  c.bottom_bar_color = (typeof raw.bottom_bar_color === "string") ? raw.bottom_bar_color : DEFAULTS.bottom_bar_color;
   c.bottom_bar_opacity = Math.max(0, Math.min(1, clampNum(raw.bottom_bar_opacity, DEFAULTS.bottom_bar_opacity)));
   c.bottom_bar_border_radius = Math.max(0, clampNum(raw.bottom_bar_border_radius, DEFAULTS.bottom_bar_border_radius));
   c.bottom_bar_bottom_offset = clampNum(raw.bottom_bar_bottom_offset, DEFAULTS.bottom_bar_bottom_offset);
-  c.bottom_bar_box_shadow = typeof raw.bottom_bar_box_shadow === "string" ? raw.bottom_bar_box_shadow : DEFAULTS.bottom_bar_box_shadow;
+  c.bottom_bar_box_shadow = (typeof raw.bottom_bar_box_shadow === "string") ? raw.bottom_bar_box_shadow : DEFAULTS.bottom_bar_box_shadow;
   c.bottom_bar_margin_left = clampNum(raw.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left);
   c.bottom_bar_margin_right = clampNum(raw.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right);
   c.bottom_bar_border_width = Math.max(0, clampNum(raw.bottom_bar_border_width, DEFAULTS.bottom_bar_border_width));
-  c.bottom_bar_border_style = typeof raw.bottom_bar_border_style === "string" ? raw.bottom_bar_border_style : DEFAULTS.bottom_bar_border_style;
-  c.bottom_bar_border_color = typeof raw.bottom_bar_border_color === "string" ? raw.bottom_bar_border_color : DEFAULTS.bottom_bar_border_color;
+  c.bottom_bar_border_style = (typeof raw.bottom_bar_border_style === "string") ? raw.bottom_bar_border_style : DEFAULTS.bottom_bar_border_style;
+  c.bottom_bar_border_color = (typeof raw.bottom_bar_border_color === "string") ? raw.bottom_bar_border_color : DEFAULTS.bottom_bar_border_color;
 
-  c.button_box_shadow = typeof raw.button_box_shadow === "string" ? raw.button_box_shadow : DEFAULTS.button_box_shadow;
-  c.button_box_shadow_hover = typeof raw.button_box_shadow_hover === "string" ? raw.button_box_shadow_hover : DEFAULTS.button_box_shadow_hover;
+  // Button shadows (CSS)
+  c.button_box_shadow = (typeof raw.button_box_shadow === "string") ? raw.button_box_shadow : DEFAULTS.button_box_shadow;
+  c.button_box_shadow_hover = (typeof raw.button_box_shadow_hover === "string") ? raw.button_box_shadow_hover : DEFAULTS.button_box_shadow_hover;
 
   c.default_button_opacity = Math.max(0, Math.min(1, clampNum(c.default_button_opacity, DEFAULTS.default_button_opacity)));
 
@@ -565,19 +602,28 @@ function normalizeConfig(cfg) {
 
   c.center_spread = !!c.center_spread;
 
-  c.offset_x_mobile = raw.offset_x_mobile != null && raw.offset_x_mobile !== "" ? Number(raw.offset_x_mobile) : null;
-  c.offset_x_tablet = raw.offset_x_tablet != null && raw.offset_x_tablet !== "" ? Number(raw.offset_x_tablet) : null;
-  c.offset_x_desktop = raw.offset_x_desktop != null && raw.offset_x_desktop !== "" ? Number(raw.offset_x_desktop) : null;
+  // Screen-size-based offsets (optional overrides)
+  c.offset_x_mobile = (raw.offset_x_mobile !== undefined && raw.offset_x_mobile !== null && raw.offset_x_mobile !== "")
+    ? Number(raw.offset_x_mobile)
+    : null;
+  c.offset_x_tablet = (raw.offset_x_tablet !== undefined && raw.offset_x_tablet !== null && raw.offset_x_tablet !== "")
+    ? Number(raw.offset_x_tablet)
+    : null;
+  c.offset_x_desktop = (raw.offset_x_desktop !== undefined && raw.offset_x_desktop !== null && raw.offset_x_desktop !== "")
+    ? Number(raw.offset_x_desktop)
+    : null;
 
-  const [hb] = ensureButtonIdsInList(c.horizontal.buttons);
-  const [vb] = ensureButtonIdsInList(c.vertical.buttons);
-  c.horizontal.buttons = hb;
-  c.vertical.buttons = vb;
+  {
+    const [hb] = ensureButtonIdsInList(c.horizontal.buttons);
+    const [vb] = ensureButtonIdsInList(c.vertical.buttons);
+    c.horizontal.buttons = hb;
+    c.vertical.buttons = vb;
 
-  const [hb2] = ensureConditionIdsInList(c.horizontal.buttons);
-  const [vb2] = ensureConditionIdsInList(c.vertical.buttons);
-  c.horizontal.buttons = hb2;
-  c.vertical.buttons = vb2;
+    const [hb2] = ensureConditionIdsInList(c.horizontal.buttons);
+    const [vb2] = ensureConditionIdsInList(c.vertical.buttons);
+    c.horizontal.buttons = hb2;
+    c.vertical.buttons = vb2;
+  }
 
   return c;
 }
@@ -586,14 +632,16 @@ function normalizeConfig(cfg) {
 
 function clamp01(n) {
   const x = Number(n);
-  return Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 1;
+  if (!Number.isFinite(x)) return 1;
+  return Math.max(0, Math.min(1, x));
 }
 
 function applyBgOpacity(color, opacity01) {
   const o = clamp01(opacity01);
   if (o >= 1) return color;
   if (o <= 0) return "transparent";
-  return `color-mix(in srgb, ${color} ${Math.round(o * 1000) / 10}%, transparent)`;
+  const pct = Math.round(o * 1000) / 10;
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
 }
 
 /* -------------------------- Card -------------------------- */
@@ -609,18 +657,29 @@ class HkiNavigationCard extends LitElement {
 
   constructor() {
     super();
+
     this._groupOverride = { horizontal: null, vertical: null };
+
     this._tapState = { lastId: null, lastTime: 0, singleTimer: null };
     this._holdTimers = new Map();
+
     this._layout = { ready: false, slots: {}, meta: {} };
+
     this._measureRaf = null;
+
     this._bottomBarMeasureRaf = null;
     this._bottomBarBounds = null;
+
+    // UI state tracking
+    // Sidebar tracking removed - using screen-size-based offsets
+
     this._contentLeftMargin = 0;
     this._contentRightMargin = 0;
     this._contentEl = null;
+
     this._rightPanelWidth = 0;
     this._rightPanelEl = null;
+
     this._uiObservers = [];
     this._resizeObservers = [];
 
@@ -654,11 +713,13 @@ class HkiNavigationCard extends LitElement {
     this._resizeObservers = [];
 
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
+
     if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
   }
 
   updated() {
     super.updated?.();
+    // If HA replaced DOM, re-hook observers opportunistically
     this._refreshUiState(false, true);
     this._scheduleMeasure();
     this._scheduleMeasureBottomBar();
@@ -678,8 +739,8 @@ class HkiNavigationCard extends LitElement {
   }
 
   _scheduleMeasure() {
-    const c = this._config;
-    if (!c || c.position === "bottom-center") return;
+    if (!this._config) return;
+    if (this._config.position === "bottom-center") return;
 
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
     this._measureRaf = requestAnimationFrame(() => this._measureAndLayout());
@@ -702,6 +763,8 @@ class HkiNavigationCard extends LitElement {
   _measureBottomBarBounds() {
     const c = this._config;
     if (!c || !c.bottom_bar_enabled || c.bottom_bar_full_width) return;
+    
+    // Non-full-width only works with center alignment
     if (c.position !== "bottom-center") return;
 
     const root = this.shadowRoot;
@@ -710,7 +773,7 @@ class HkiNavigationCard extends LitElement {
     const vw = window.innerWidth || document.documentElement.clientWidth || 0;
     if (vw <= 0) return;
 
-    const fabs = root.querySelectorAll(".fab-anchor .fab");
+    const fabs = Array.from(root.querySelectorAll(".fab-anchor .fab"));
     if (!fabs.length) return;
 
     const rects = [];
@@ -722,20 +785,27 @@ class HkiNavigationCard extends LitElement {
     }
     if (!rects.length) return;
 
+    // Find the bottom-most row of buttons
     const maxBottom = Math.max(...rects.map((r) => r.bottom));
     const tol = 2;
-    const bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
+    let bottomRow = rects.filter((r) => r.bottom >= maxBottom - tol);
+    
     if (!bottomRow.length) return;
 
+    // SIMPLE APPROACH FOR CENTER ALIGNMENT: Take buttons near the center
+    // Center-aligned buttons should all be clustered near the middle of the viewport
     const centerX = vw / 2;
+    
+    // Take buttons that are within 40% of viewport width from center
+    // This captures buttons from 30% to 70% of viewport width
     const threshold = vw * 0.4;
     const mainCluster = bottomRow.filter(r => {
       const buttonCenterX = (r.left + r.right) / 2;
       return Math.abs(buttonCenterX - centerX) <= threshold;
     });
-
+    
     if (!mainCluster.length) return;
-
+    
     const minLeft = Math.min(...mainCluster.map((r) => r.left));
     const maxRight = Math.max(...mainCluster.map((r) => r.right));
 
@@ -745,21 +815,25 @@ class HkiNavigationCard extends LitElement {
     };
 
     const cur = this._bottomBarBounds;
-    if (!cur || cur.left !== next.left || cur.right !== next.right) {
+    const changed = !cur || cur.left !== next.left || cur.right !== next.right;
+    if (changed) {
       this._bottomBarBounds = next;
       this.requestUpdate();
     }
   }
+
 
   _isEditMode() {
     try {
       const qs = new URLSearchParams(window.location.search || "");
       if (qs.get("edit") === "1") return true;
     } catch (_) {}
-    const bodyClasses = document.body?.classList;
-    return bodyClasses?.contains("edit-mode") || bodyClasses?.contains("edit") || false;
+    if (document.body?.classList?.contains("edit-mode")) return true;
+    if (document.body?.classList?.contains("edit")) return true;
+    return false;
   }
 
+  // Deep query into shadow DOMs
   _queryDeep(selector, root = document, maxDepth = 12) {
     const results = [];
     const visited = new Set();
@@ -770,8 +844,7 @@ class HkiNavigationCard extends LitElement {
 
       try {
         if (node.querySelectorAll) {
-          const found = node.querySelectorAll(selector);
-          for (let i = 0; i < found.length; i++) results.push(found[i]);
+          node.querySelectorAll(selector).forEach((el) => results.push(el));
         }
       } catch (_) {}
 
@@ -779,8 +852,8 @@ class HkiNavigationCard extends LitElement {
       if (sr) walk(sr, depth + 1);
 
       const children = node instanceof ShadowRoot ? node.host?.children : node.children;
-      if (children) {
-        for (let i = 0; i < children.length; i++) walk(children[i], depth + 1);
+      if (children && children.length) {
+        for (const ch of children) walk(ch, depth + 1);
       }
     };
 
@@ -810,8 +883,10 @@ class HkiNavigationCard extends LitElement {
 
   _measureContentMargins() {
     const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+
     const predicate = (_el, rect) => rect.width >= 200 && rect.height >= 200;
 
+    // Prefer actual "view" elements over the outer ha-panel-lovelace container (which may span full width).
     const preferred = [
       ...this._queryDeep("hui-sections-view"),
       ...this._queryDeep("hui-view"),
@@ -821,7 +896,10 @@ class HkiNavigationCard extends LitElement {
     let el = this._findVisibleBest(preferred, predicate);
 
     if (!el) {
-      el = this._findVisibleBest(this._queryDeep("ha-panel-lovelace"), predicate);
+      const fallback = [
+        ...this._queryDeep("ha-panel-lovelace"),
+      ];
+      el = this._findVisibleBest(fallback, predicate);
     }
 
     this._contentEl = el || null;
@@ -838,10 +916,25 @@ class HkiNavigationCard extends LitElement {
   }
 
   _refreshUiState(forceRehook = false, softRehook = false) {
+    // Measure sidebar state (HA has changed this a few times: ha-sidebar, drawers, etc.)
     const viewW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const sidebarCandidates = [
+      ...this._queryDeep("ha-sidebar"),
+      ...this._queryDeep("ha-drawer"),
+      ...this._queryDeep("mwc-drawer"),
+      ...this._queryDeep("app-drawer-layout"),
+    ];
+    const sb = this._findVisibleBest(sidebarCandidates, (_el, rect) => {
+      if (rect.width <= 0) return false;
+      const onLeft = rect.left <= 2;
+      // Avoid accidentally matching the right edit drawer
+      const notRightDrawer = viewW <= 0 ? true : rect.right <= viewW * 0.65;
+      return onLeft && notRightDrawer;
+    });
+    // Sidebar detection removed
 
-    // Measure right edit panel
-    const vw = viewW;
+    // Measure right edit panel (often a drawer on the right)
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
     const rightCandidates = [
       ...this._queryDeep("ha-drawer"),
       ...this._queryDeep("mwc-drawer"),
@@ -849,15 +942,21 @@ class HkiNavigationCard extends LitElement {
     ];
     const rightEl = this._findVisibleBest(rightCandidates, (_el, rect) => {
       if (vw <= 0) return false;
-      return rect.right >= vw - 2 && rect.left >= vw * 0.55 && rect.width >= 120;
+      const nearRight = rect.right >= vw - 2;
+      const onRightHalf = rect.left >= vw * 0.55;
+      const wideEnough = rect.width >= 120;
+      return nearRight && onRightHalf && wideEnough;
     });
 
     this._rightPanelEl = rightEl || null;
     this._rightPanelWidth = rightEl ? (rightEl.getBoundingClientRect().width || 0) : 0;
 
+    // Content margins (this is the real fix for sidebar-alignment)
     this._measureContentMargins();
 
+    // Hook observers to update when sidebar toggles
     if (forceRehook || softRehook) {
+      // disconnect old
       for (const o of this._uiObservers) {
         try { o.disconnect(); } catch (_) {}
       }
@@ -880,6 +979,7 @@ class HkiNavigationCard extends LitElement {
         } catch (_) {}
       };
 
+      // Sidebar observation removed
       observeElAttrs(this._rightPanelEl, ["open", "opened", "style", "class"]);
       observeElAttrs(document.body, ["class", "style"]);
       observeElAttrs(this._contentEl, ["style", "class"]);
@@ -897,6 +997,7 @@ class HkiNavigationCard extends LitElement {
             this._resizeObservers.push(ro);
           } catch (_) {}
         };
+        // Sidebar resize observation removed
         hookResize(this._rightPanelEl);
         hookResize(this._contentEl);
       }
@@ -904,8 +1005,10 @@ class HkiNavigationCard extends LitElement {
   }
 
   _getButtonType(btn) {
+    const c = this._config;
     const t = safeString(btn?.button_type);
-    return (t && BUTTON_TYPE_VALUES.has(t)) ? t : inferButtonTypeFromLegacy(btn, this._config.default_button_type);
+    if (t && BUTTON_TYPES.some((x) => x.value === t)) return t;
+    return inferButtonTypeFromLegacy(btn, c.default_button_type);
   }
 
   _getLabelText(btn) {
@@ -916,16 +1019,17 @@ class HkiNavigationCard extends LitElement {
     const per = btn?.pill_width;
     if (_hasMeaningfulNumber(per)) {
       const n = _toNumber(per);
-      return n <= 0 ? 0 : Math.max(MIN_PILL_WIDTH, n);
+      if (n <= 0) return 0;
+      return Math.max(MIN_PILL_WIDTH, n);
     }
     const g = clampNum(this._config.pill_width, 0);
-    return g > 0 ? Math.max(MIN_PILL_WIDTH, g) : 0;
+    if (g > 0) return Math.max(MIN_PILL_WIDTH, g);
+    return 0;
   }
 
   _buttonOpacity(btn) {
-    return _hasMeaningfulNumber(btn?.background_opacity)
-      ? clamp01(_toNumber(btn.background_opacity))
-      : clamp01(this._config.default_button_opacity);
+    if (_hasMeaningfulNumber(btn?.background_opacity)) return clamp01(_toNumber(btn.background_opacity));
+    return clamp01(this._config.default_button_opacity);
   }
 
   _buttonBg(btn) {
@@ -939,25 +1043,54 @@ class HkiNavigationCard extends LitElement {
 
   _labelBubbleStyle(btn) {
     const merged = mergeLabelStyle(this._config.label_style, btn?.label_style);
-    const bg = merged.background && merged.background !== ""
-      ? applyBgOpacity(merged.background, clamp01(merged.background_opacity))
-      : `rgba(var(--rgb-card-background-color, 0, 0, 0), ${clamp01(merged.background_opacity)})`;
-    const color = merged.color && merged.color !== "" ? merged.color : "var(--text-primary-color, var(--primary-text-color))";
 
-    return `font-size:${merged.font_size}px;font-weight:${merged.font_weight};letter-spacing:${merged.letter_spacing}px;text-transform:${merged.text_transform};color:${color};background:${bg};padding:${merged.padding_y}px ${merged.padding_x}px;border-radius:${merged.border_radius}px;max-width:${merged.max_width}px;backdrop-filter:blur(${merged.backdrop_blur}px);-webkit-backdrop-filter:blur(${merged.backdrop_blur}px)`;
+    const bg =
+      merged.background && merged.background !== ""
+        ? applyBgOpacity(merged.background, clamp01(merged.background_opacity))
+        : `rgba(var(--rgb-card-background-color, 0, 0, 0), ${clamp01(merged.background_opacity)})`;
+
+    const color =
+      merged.color && merged.color !== ""
+        ? merged.color
+        : "var(--text-primary-color, var(--primary-text-color))";
+
+    return [
+      `font-size:${merged.font_size}px`,
+      `font-weight:${merged.font_weight}`,
+      `letter-spacing:${merged.letter_spacing}px`,
+      `text-transform:${merged.text_transform}`,
+      `color:${color}`,
+      `background:${bg}`,
+      `padding:${merged.padding_y}px ${merged.padding_x}px`,
+      `border-radius:${merged.border_radius}px`,
+      `max-width:${merged.max_width}px`,
+      `backdrop-filter:blur(${merged.backdrop_blur}px)`,
+      `-webkit-backdrop-filter:blur(${merged.backdrop_blur}px)`,
+    ].join(";");
   }
 
   _pillTextStyle(btn) {
     const merged = mergeLabelStyle(this._config.label_style, btn?.label_style);
-    const color = merged.color && merged.color !== "" ? merged.color : "currentColor";
-    return `font-size:${merged.font_size}px;font-weight:${merged.font_weight};letter-spacing:${merged.letter_spacing}px;text-transform:${merged.text_transform};color:${color}`;
+    const color =
+      merged.color && merged.color !== ""
+        ? merged.color
+        : "currentColor";
+
+    return [
+      `font-size:${merged.font_size}px`,
+      `font-weight:${merged.font_weight}`,
+      `letter-spacing:${merged.letter_spacing}px`,
+      `text-transform:${merged.text_transform}`,
+      `color:${color}`,
+    ].join(";");
   }
 
   /* -------------------------- Conditions -------------------------- */
 
   _evalCondition(cond) {
     const hass = this.hass;
-    if (!hass || !cond || typeof cond !== "object") return true;
+    if (!hass) return true;
+    if (!cond || typeof cond !== "object") return true;
 
     const type = cond.type || "entity";
     let result = true;
@@ -971,48 +1104,48 @@ class HkiNavigationCard extends LitElement {
 
       if (operator === "exists") result = !!stateObj;
       else if (operator === "not_exists") result = !stateObj;
-      else if (!stateObj) result = false;
       else {
-        const actual = cond.attribute ? stateObj.attributes?.[cond.attribute] : stateObj.state;
-        const actualStr = safeString(actual);
-        const valueStr = safeString(cond.value);
+        if (!stateObj) result = false;
+        else {
+          const actual = cond.attribute ? stateObj.attributes?.[cond.attribute] : stateObj.state;
+          const actualStr = safeString(actual);
+          const valueStr = safeString(cond.value);
 
-        switch (operator) {
-          case "equals": result = actualStr === valueStr; break;
-          case "not_equals": result = actualStr !== valueStr; break;
-          case "above": {
-            const a = Number(actual), v = Number(cond.value);
-            result = Number.isFinite(a) && Number.isFinite(v) && a > v;
-            break;
+          if (operator === "equals") result = actualStr === valueStr;
+          else if (operator === "not_equals") result = actualStr !== valueStr;
+          else if (operator === "above") {
+            const a = Number(actual);
+            const v = Number(cond.value);
+            result = Number.isFinite(a) && Number.isFinite(v) ? a > v : false;
+          } else if (operator === "below") {
+            const a = Number(actual);
+            const v = Number(cond.value);
+            result = Number.isFinite(a) && Number.isFinite(v) ? a < v : false;
+          } else if (operator === "includes") {
+            if (Array.isArray(actual)) result = actual.map(safeString).includes(valueStr);
+            else result = actualStr.includes(valueStr);
+          } else if (operator === "not_includes") {
+            if (Array.isArray(actual)) result = !actual.map(safeString).includes(valueStr);
+            else result = !actualStr.includes(valueStr);
           }
-          case "below": {
-            const a = Number(actual), v = Number(cond.value);
-            result = Number.isFinite(a) && Number.isFinite(v) && a < v;
-            break;
-          }
-          case "includes":
-            result = Array.isArray(actual) ? actual.map(safeString).includes(valueStr) : actualStr.includes(valueStr);
-            break;
-          case "not_includes":
-            result = Array.isArray(actual) ? !actual.map(safeString).includes(valueStr) : !actualStr.includes(valueStr);
-            break;
         }
       }
     } else if (type === "user") {
-      const userName = hass.user?.name || "";
+      const userName = this.hass?.user?.name || "";
       const list = Array.isArray(cond.users) ? cond.users : [];
-      result = list.length === 0 || list.includes(userName);
+      result = list.length === 0 ? true : list.includes(userName);
     } else if (type === "view") {
       const path = window.location?.pathname || "";
       const list = Array.isArray(cond.views) ? cond.views : [];
-      result = list.length === 0 || list.some((v) => v === path || path.endsWith(v));
+      result = list.length === 0 ? true : list.some((v) => v === path || path.endsWith(v));
     } else if (type === "screen") {
       const mode = cond.mode || "mobile";
       const isMobile = window.matchMedia?.("(max-width: 800px)")?.matches ?? false;
       result = mode === "mobile" ? isMobile : !isMobile;
     }
 
-    return cond.invert ? !result : result;
+    if (cond.invert) result = !result;
+    return result;
   }
 
   _isButtonVisible(btn) {
@@ -1020,19 +1153,20 @@ class HkiNavigationCard extends LitElement {
     if (conds.length === 0) return true;
 
     const mode = btn.conditions_mode === "any" ? "any" : "all";
-    return mode === "any"
-      ? conds.some((c) => this._evalCondition(c))
-      : conds.every((c) => this._evalCondition(c));
+    const results = conds.map((c) => this._evalCondition(c));
+    return mode === "any" ? results.some(Boolean) : results.every(Boolean);
   }
 
   /* -------------------------- Group visibility -------------------------- */
 
   _isGroupVisible(groupKey) {
     const c = this._config;
+
     if (c.position === "bottom-center" && groupKey === "vertical") return false;
 
     const baseEnabled = groupKey === "horizontal" ? !!c.horizontal.enabled : !!c.vertical.enabled;
     const override = this._groupOverride[groupKey];
+
     return override === null ? baseEnabled : !!override;
   }
 
@@ -1065,7 +1199,8 @@ class HkiNavigationCard extends LitElement {
       else if (mode === "hide") next = false;
       else next = !current;
 
-      this._groupOverride[key] = next === baseEnabled ? null : next;
+      if (next === baseEnabled) this._groupOverride[key] = null;
+      else this._groupOverride[key] = next;
     };
 
     if (target === "both") {
@@ -1084,13 +1219,22 @@ class HkiNavigationCard extends LitElement {
   _computeOffsetX() {
     const c = this._config;
     const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-
-    if (vw < 768 && c.offset_x_mobile != null) return c.offset_x_mobile;
-    if (vw >= 768 && vw < 1024 && c.offset_x_tablet != null) return c.offset_x_tablet;
-    if (vw >= 1024 && c.offset_x_desktop != null) return c.offset_x_desktop;
-
+    
+    // Check for screen-size-specific overrides
+    if (vw < 768 && c.offset_x_mobile !== undefined && c.offset_x_mobile !== null) {
+      return c.offset_x_mobile;
+    }
+    if (vw >= 768 && vw < 1024 && c.offset_x_tablet !== undefined && c.offset_x_tablet !== null) {
+      return c.offset_x_tablet;
+    }
+    if (vw >= 1024 && c.offset_x_desktop !== undefined && c.offset_x_desktop !== null) {
+      return c.offset_x_desktop;
+    }
+    
+    // Use the base offset_x value from UI
     return c.offset_x || 0;
   }
+
 
   _renderBottomBar() {
     const c = this._config;
@@ -1099,47 +1243,79 @@ class HkiNavigationCard extends LitElement {
     const height = Math.max(0, clampInt(c.bottom_bar_height, DEFAULTS.bottom_bar_height, 0));
     if (height <= 0) return null;
 
-    const color = (typeof c.bottom_bar_color === "string" && c.bottom_bar_color.trim()) || DEFAULTS.bottom_bar_color;
+    const color = (typeof c.bottom_bar_color === "string" && c.bottom_bar_color.trim())
+      ? c.bottom_bar_color.trim()
+      : DEFAULTS.bottom_bar_color;
+
     const opacity = Math.max(0, Math.min(1, clampNum(c.bottom_bar_opacity, DEFAULTS.bottom_bar_opacity)));
+    // Z-index: 1 = above content, but below sidebar (which is typically 100+)
+    const z = 1;
     const bottom = clampNum(c.bottom_bar_bottom_offset, DEFAULTS.bottom_bar_bottom_offset);
     const radius = Math.max(0, clampNum(c.bottom_bar_border_radius, DEFAULTS.bottom_bar_border_radius));
-    const shadow = (typeof c.bottom_bar_box_shadow === "string" && c.bottom_bar_box_shadow.trim()) || "";
+    const shadow = (typeof c.bottom_bar_box_shadow === "string" && c.bottom_bar_box_shadow.trim())
+      ? c.bottom_bar_box_shadow.trim()
+      : "";
+
     const marginLeft = clampNum(c.bottom_bar_margin_left, DEFAULTS.bottom_bar_margin_left);
     const marginRight = clampNum(c.bottom_bar_margin_right, DEFAULTS.bottom_bar_margin_right);
+    
     const borderWidth = Math.max(0, clampNum(c.bottom_bar_border_width, DEFAULTS.bottom_bar_border_width));
-    const borderStyle = (typeof c.bottom_bar_border_style === "string" && c.bottom_bar_border_style.trim()) || DEFAULTS.bottom_bar_border_style;
-    const borderColor = (typeof c.bottom_bar_border_color === "string" && c.bottom_bar_border_color.trim()) || "";
+    const borderStyle = (typeof c.bottom_bar_border_style === "string" && c.bottom_bar_border_style.trim())
+      ? c.bottom_bar_border_style.trim()
+      : DEFAULTS.bottom_bar_border_style;
+    const borderColor = (typeof c.bottom_bar_border_color === "string" && c.bottom_bar_border_color.trim())
+      ? c.bottom_bar_border_color.trim()
+      : "";
 
     const styleParts = [
       `height:${height}px`,
       `background:${color}`,
       `opacity:${opacity}`,
-      `z-index:1`,
+      `z-index:${z}`,
       `border-radius:${radius}px`,
       `bottom:${bottom}px`,
     ];
-
+    
     if (shadow) styleParts.push(`box-shadow:${shadow}`);
+    
     if (borderWidth > 0 && borderColor) {
-      styleParts.push(`border:${borderWidth}px ${borderStyle} ${borderColor}`);
+      styleParts.push(`border: ${borderWidth}px ${borderStyle} ${borderColor}`);
     }
 
+    // Position the bar based on button alignment and full width setting
+    // Non-full-width only works with center alignment
     const isFullWidth = c.bottom_bar_full_width || c.position !== "bottom-center";
-
+    
     if (isFullWidth) {
-      styleParts.push(`left:${marginLeft}px`, `right:${marginRight}px`);
+      // Full width mode: truly span entire viewport width
+      styleParts.push(`left:${marginLeft}px`);
+      styleParts.push(`right:${marginRight}px`);
     } else {
+      // Follow buttons mode: measure and position behind actual buttons
       this._scheduleMeasureBottomBar();
+      
       if (this._bottomBarBounds) {
-        styleParts.push(`left:${this._bottomBarBounds.left - marginLeft}px`, `right:${this._bottomBarBounds.right - marginRight}px`);
+        // Position bar using measured button bounds
+        // _bottomBarBounds.left is px from left edge, .right is px from right edge
+        // Positive margins EXTEND the bar beyond buttons
+        const finalLeft = this._bottomBarBounds.left - marginLeft;
+        const finalRight = this._bottomBarBounds.right - marginRight;
+        
+        styleParts.push(`left:${finalLeft}px`);
+        styleParts.push(`right:${finalRight}px`);
       } else {
+        // Fallback position while measuring
         const offsetX = this._computeOffsetX();
-        styleParts.push(`left:${offsetX - marginLeft}px`, `right:${offsetX - marginRight}px`);
+        styleParts.push(`left:${offsetX - marginLeft}px`);
+        styleParts.push(`right:${offsetX - marginRight}px`);
       }
     }
 
-    return html`<div class="bottom-bar" style="${styleParts.join(";")}"></div>`;
+    return html`
+      <div class="bottom-bar" style="${styleParts.join(";")}"></div>
+    `;
   }
+
 
   /* -------------------------- Dynamic layout measurement -------------------------- */
 
@@ -1150,14 +1326,14 @@ class HkiNavigationCard extends LitElement {
     const root = this.shadowRoot;
     if (!root) return;
 
-    const slotEls = root.querySelectorAll(".abs-slot");
+    const slotEls = Array.from(root.querySelectorAll(".abs-slot"));
     if (!slotEls.length) return;
 
     const widthByKey = {};
     for (const el of slotEls) {
       const slotId = el.getAttribute("data-slot-id") || "";
       const fab = el.querySelector(".fab");
-      const rect = fab?.getBoundingClientRect();
+      const rect = fab ? fab.getBoundingClientRect() : null;
       widthByKey[slotId] = rect?.width ? Math.max(rect.width, 1) : c.button_size;
     }
 
@@ -1170,6 +1346,7 @@ class HkiNavigationCard extends LitElement {
     const isRight = c.position === "bottom-right";
 
     const baseW = widthByKey[plan.baseKey] ?? c.button_size;
+
     const cols = Math.max(1, c.horizontal.columns);
     const hColW = new Array(cols).fill(c.button_size);
 
@@ -1192,10 +1369,14 @@ class HkiNavigationCard extends LitElement {
     }
 
     const hPrefix = new Array(cols).fill(0);
-    for (let i = 1; i < cols; i++) hPrefix[i] = hPrefix[i - 1] + hColW[i - 1] + gapX;
+    for (let i = 1; i < cols; i++) {
+      hPrefix[i] = hPrefix[i - 1] + hColW[i - 1] + gapX;
+    }
 
     const vPrefix = new Array(vWrapCols).fill(0);
-    for (let i = 1; i < vWrapCols; i++) vPrefix[i] = vPrefix[i - 1] + vWrapW[i - 1] + gapX;
+    for (let i = 1; i < vWrapCols; i++) {
+      vPrefix[i] = vPrefix[i - 1] + vWrapW[i - 1] + gapX;
+    }
 
     const positions = {};
     positions[plan.baseKey] = isRight ? { x: -baseW, y: 0 } : { x: 0, y: 0 };
@@ -1237,7 +1418,11 @@ class HkiNavigationCard extends LitElement {
       }
     }
 
-    this._layout = { ready: true, slots: positions, meta: { baseW, hSpan, isRight } };
+    this._layout = {
+      ready: true,
+      slots: positions,
+      meta: { baseW, hSpan, isRight },
+    };
     this.requestUpdate();
   }
 
@@ -1251,8 +1436,13 @@ class HkiNavigationCard extends LitElement {
     const horizontalVisible = this._isGroupVisible("horizontal");
     const verticalVisible = this._isGroupVisible("vertical");
 
-    const hButtons = horizontalVisible ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
-    const vButtons = verticalVisible ? (c.vertical.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
+    const hButtons = horizontalVisible
+      ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b))
+      : [];
+
+    const vButtons = verticalVisible
+      ? (c.vertical.buttons || []).filter((b) => this._isButtonVisible(b))
+      : [];
 
     const slots = [];
     const cols = Math.max(1, c.horizontal.columns);
@@ -1261,7 +1451,8 @@ class HkiNavigationCard extends LitElement {
     for (let i = 0; i < hButtons.length; i++) {
       const row = Math.floor(i / cols);
       const col = 1 + (i % cols);
-      slots.push({ area: "h", key: `h:${hButtons[i].id}`, row, col });
+      const key = `h:${hButtons[i].id}`;
+      slots.push({ area: "h", key, row, col });
     }
 
     let vWrapCols = 0;
@@ -1269,7 +1460,8 @@ class HkiNavigationCard extends LitElement {
       const r = 1 + (j % rows);
       const wrapCol = Math.floor(j / rows);
       vWrapCols = Math.max(vWrapCols, wrapCol + 1);
-      slots.push({ area: "v", key: `v:${vButtons[j].id}`, row: r, wrapCol });
+      const key = `v:${vButtons[j].id}`;
+      slots.push({ area: "v", key, row: r, wrapCol });
     }
 
     return { baseKey, slots, vWrapCols };
@@ -1281,12 +1473,14 @@ class HkiNavigationCard extends LitElement {
     const hass = this.hass;
     if (!hass) return;
 
-    const action = btn?.[which] || btn?.tap_action || { action: "none" };
+    const action = (btn && btn[which]) || btn?.tap_action || { action: "none" };
     const type = action?.action || "none";
     if (type === "none") return;
 
     if (type === "toggle-group") {
-      this._toggleGroup(action.target || "vertical", action.mode || "toggle");
+      const target = action.target || "vertical";
+      const mode = action.mode || "toggle";
+      this._toggleGroup(target, mode);
       return;
     }
 
@@ -1298,7 +1492,8 @@ class HkiNavigationCard extends LitElement {
     }
 
     if (type === "navigate") {
-      history.pushState(null, "", action.navigation_path || "/");
+      const path = action.navigation_path || "/";
+      history.pushState(null, "", path);
       fireEvent(window, "location-changed", {});
       this._autoCloseTempMenus();
       return;
@@ -1306,26 +1501,23 @@ class HkiNavigationCard extends LitElement {
 
     if (type === "url") {
       const url = action.url_path;
-      if (url) {
-        window.open(url, action.new_tab === false ? "_self" : "_blank", "noreferrer");
-        this._autoCloseTempMenus();
-      }
+      if (!url) return;
+      window.open(url, action.new_tab === false ? "_self" : "_blank", "noreferrer");
+      this._autoCloseTempMenus();
       return;
     }
 
     if (type === "toggle") {
-      if (btn?.entity) {
-        hass.callService("homeassistant", "toggle", { entity_id: btn.entity });
-        this._autoCloseTempMenus();
-      }
+      if (!btn?.entity) return;
+      hass.callService("homeassistant", "toggle", { entity_id: btn.entity });
+      this._autoCloseTempMenus();
       return;
     }
 
     if (type === "more-info") {
-      if (btn?.entity) {
-        fireEvent(this, "hass-more-info", { entityId: btn.entity });
-        this._autoCloseTempMenus();
-      }
+      if (!btn?.entity) return;
+      fireEvent(this, "hass-more-info", { entityId: btn.entity });
+      this._autoCloseTempMenus();
       return;
     }
 
@@ -1343,10 +1535,13 @@ class HkiNavigationCard extends LitElement {
         data = {};
       }
 
+      // Core-like: target entity picker (string) writes entity_id
       const targetEntity = safeString(action.target_entity || "").trim();
-      if (targetEntity) data = { ...data, entity_id: targetEntity };
+      if (targetEntity) {
+        data = { ...(data || {}), entity_id: targetEntity };
+      }
 
-      hass.callService(domain, service, data);
+      hass.callService(domain, service, data || {});
       this._autoCloseTempMenus();
       return;
     }
@@ -1420,20 +1615,33 @@ class HkiNavigationCard extends LitElement {
 
   _renderButton(btn) {
     const type = this._getButtonType(btn);
+
     const labelText = this._getLabelText(btn);
     const hasLabel = !!labelText;
-    const isPill = this._isPillType(type);
 
-    const showIcon = type === "icon" || type === "icon_label_below" || type === "icon_label_left" || type === "icon_label_right" || type === "pill";
+    const isPill = this._isPillType(type);
+    const showIcon =
+      type === "icon" ||
+      type === "icon_label_below" ||
+      type === "icon_label_left" ||
+      type === "icon_label_right" ||
+      type === "pill";
+
     const showBubbleBelow = type === "icon_label_below" && hasLabel;
     const showBubbleLeft = type === "icon_label_left" && hasLabel;
     const showBubbleRight = type === "icon_label_right" && hasLabel;
+
     const showPillText = isPill && hasLabel;
 
     const bg = this._buttonBg(btn);
     const iconColor = this._buttonIconColor(btn);
-    const isBackTap = btn?.tap_action?.action === "back";
-    const icon = isBackTap ? "mdi:chevron-left" : (btn.icon?.trim() || "mdi:circle");
+
+    // FORCE icon for Back tap action regardless of user choice
+    const isBackTap = (btn?.tap_action?.action === "back");
+    const icon =
+      isBackTap ? "mdi:chevron-left" :
+      (btn.icon && btn.icon.trim()) ? btn.icon :
+      "mdi:circle";
 
     const pillWidth = isPill ? this._getPillWidth(btn) : 0;
     const pillFixed = isPill && pillWidth > 0;
@@ -1468,8 +1676,12 @@ class HkiNavigationCard extends LitElement {
             ${showPillText ? html`<span class="pill-text" style="${this._pillTextStyle(btn)}">${labelText}</span>` : html``}
           </button>
 
-          ${floatSide === "left" ? html`<div class="label label-float" style="${this._labelBubbleStyle(btn)}; right: calc(100% + ${floatGap}px); top: 50%; transform: translateY(-50%);">${labelText}</div>` : html``}
-          ${floatSide === "right" ? html`<div class="label label-float" style="${this._labelBubbleStyle(btn)}; left: calc(100% + ${floatGap}px); top: 50%; transform: translateY(-50%);">${labelText}</div>` : html``}
+          ${floatSide === "left"
+            ? html`<div class="label label-float" style="${this._labelBubbleStyle(btn)}; right: calc(100% + ${floatGap}px); top: 50%; transform: translateY(-50%);">${labelText}</div>`
+            : html``}
+          ${floatSide === "right"
+            ? html`<div class="label label-float" style="${this._labelBubbleStyle(btn)}; left: calc(100% + ${floatGap}px); top: 50%; transform: translateY(-50%);">${labelText}</div>`
+            : html``}
         </div>
 
         ${showBubbleBelow ? html`<div class="label" style="${this._labelBubbleStyle(btn)}">${labelText}</div>` : html``}
@@ -1482,6 +1694,7 @@ class HkiNavigationCard extends LitElement {
     const c = this._config;
 
     const editMode = this._isEditMode();
+
     const offsetX = this._computeOffsetX();
     const offsetY = c.offset_y;
 
@@ -1489,6 +1702,7 @@ class HkiNavigationCard extends LitElement {
       if (c.position === "bottom-center") {
         if (c.center_spread) return `left:0px; right:0px; bottom:${offsetY}px;`;
 
+        // Keep true center aligned to the Lovelace content (accounts for sidebar push + right panels + padding)
         const lm = this._contentLeftMargin || 0;
         const rm = this._contentRightMargin || 0;
         const shift = (lm - rm) / 2;
@@ -1498,9 +1712,11 @@ class HkiNavigationCard extends LitElement {
         return `left:50%; transform:translateX(-50%); bottom:${offsetY}px;`;
       }
       if (c.position === "bottom-left") {
+        // Add contentLeftMargin to account for sidebar
         const lm = this._contentLeftMargin || 0;
         return `left:${offsetX + lm}px; bottom:${offsetY}px;`;
       }
+      // bottom-right: Add contentRightMargin to account for right panels
       const rm = this._contentRightMargin || 0;
       return `right:${offsetX + rm}px; bottom:${offsetY}px;`;
     })();
@@ -1516,6 +1732,7 @@ class HkiNavigationCard extends LitElement {
 
     const base = c.base?.button;
 
+    // In edit mode, add a real in-section placeholder so it’s easy to click/edit
     const placeholder = editMode
       ? html`
           <ha-card class="edit-placeholder">
@@ -1535,6 +1752,8 @@ class HkiNavigationCard extends LitElement {
       const hButtons = horizontalVisible ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
 
       const all = [base, ...hButtons];
+
+      // Apply the same "columns" logic as the corner layouts (center will wrap into multiple rows)
       const cols = Math.max(1, clampInt(c.horizontal.columns, DEFAULTS.horizontal.columns, 1));
       const rows = [];
       for (let i = 0; i < all.length; i += cols) rows.push(all.slice(i, i + cols));
@@ -1564,9 +1783,17 @@ class HkiNavigationCard extends LitElement {
     const hButtons = horizontalVisible ? (c.horizontal.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
     const vButtons = verticalVisible ? (c.vertical.buttons || []).filter((b) => this._isButtonVisible(b)) : [];
 
-    const slots = [{ key: `base:${base.id}`, btn: base }];
-    for (let i = 0; i < hButtons.length; i++) slots.push({ key: `h:${hButtons[i].id}`, btn: hButtons[i] });
-    for (let j = 0; j < vButtons.length; j++) slots.push({ key: `v:${vButtons[j].id}`, btn: vButtons[j] });
+    const slots = [];
+    const baseKey = `base:${base.id}`;
+    slots.push({ key: baseKey, btn: base });
+
+    for (let i = 0; i < hButtons.length; i++) {
+      slots.push({ key: `h:${hButtons[i].id}`, btn: hButtons[i] });
+    }
+
+    for (let j = 0; j < vButtons.length; j++) {
+      slots.push({ key: `v:${vButtons[j].id}`, btn: vButtons[j] });
+    }
 
     return html`
       ${placeholder}
@@ -1577,8 +1804,10 @@ class HkiNavigationCard extends LitElement {
             const pos = this._layout?.slots?.[s.key];
             const tx = pos ? pos.x : 0;
             const ty = pos ? pos.y : 0;
+            const style = pos ? `transform: translate(${tx}px, ${ty}px);` : `transform: translate(0px,0px);`;
+
             return html`
-              <div class="abs-slot" data-slot-id="${s.key}" style="transform: translate(${tx}px, ${ty}px);">
+              <div class="abs-slot" data-slot-id="${s.key}" style="${style}">
                 ${this._renderButton(s.btn)}
               </div>
             `;
@@ -1645,7 +1874,7 @@ class HkiNavigationCard extends LitElement {
       .center-stack {
         pointer-events: none;
         display: flex;
-        flex-direction: column-reverse;
+        flex-direction: column-reverse; /* bottom row stays closest to the bottom */
         align-items: stretch;
       }
 
@@ -1654,16 +1883,21 @@ class HkiNavigationCard extends LitElement {
         display: flex;
         align-items: center;
         gap: var(--hki-gap);
+      }
+
+.center-row {
+        /* When not spread, keep each row centered */
         width: fit-content;
         margin: 0 auto;
       }
 
+      /* When spread (full width), rows occupy all width */
       .center-stack.spread .center-row {
         width: 100%;
         margin: 0;
       }
 
-      .item {
+.item {
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -1693,10 +1927,12 @@ class HkiNavigationCard extends LitElement {
         border: none;
         outline: none;
         cursor: pointer;
+
         display: inline-flex;
         align-items: center;
         justify-content: center;
         position: relative;
+
         box-shadow: var(--hki-button-shadow, 0 8px 24px rgba(0, 0, 0, 0.35));
         transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
         filter: saturate(1.05);
@@ -1744,6 +1980,7 @@ class HkiNavigationCard extends LitElement {
         pointer-events: none;
         line-height: 1.1;
         border-radius: 999px;
+
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -1787,6 +2024,7 @@ class HkiNavigationCardEditor extends LitElement {
     fireEvent(this, "config-changed", { config: cfg });
   }
 
+  // ---- Global settings should override existing per-button overrides immediately (no prompts)
   _applyGlobalAndClearOverrides(keyPath, mutateFn) {
     const cfg = deepClone(this._c);
     mutateFn(cfg);
@@ -1868,12 +2106,14 @@ class HkiNavigationCardEditor extends LitElement {
   }
 
   _getButtons(group) {
-    return this._c[this._listKey(group)]?.buttons || [];
+    const g = this._listKey(group);
+    return (this._c[g]?.buttons || []);
   }
 
   _setButtons(group, nextButtons) {
     const cfg = deepClone(this._c);
-    cfg[this._listKey(group)].buttons = nextButtons;
+    const g = this._listKey(group);
+    cfg[g].buttons = nextButtons;
     this._emit(cfg);
   }
 
@@ -1907,6 +2147,7 @@ class HkiNavigationCardEditor extends LitElement {
   }
 
   _renderEntityPicker(label, value, onChange) {
+    // Prefer HA selector (this matches the exact UI in your screenshot)
     if (customElements.get("ha-selector")) {
       return html`
         <ha-selector
@@ -1919,6 +2160,7 @@ class HkiNavigationCardEditor extends LitElement {
       `;
     }
 
+    // Fallback: old picker
     if (customElements.get("ha-entity-picker")) {
       return html`
         <ha-entity-picker
@@ -1931,6 +2173,7 @@ class HkiNavigationCardEditor extends LitElement {
       `;
     }
 
+    // Last fallback
     return html`
       <ha-textfield
         .label=${label}
@@ -1941,9 +2184,11 @@ class HkiNavigationCardEditor extends LitElement {
     `;
   }
 
+
   _renderNavigationPathPicker(label, value, onChange) {
     const val = value || "";
 
+    // Prefer the dedicated navigation picker if it exists
     if (customElements.get("ha-navigation-picker")) {
       return html`
         <ha-navigation-picker
@@ -1955,6 +2200,7 @@ class HkiNavigationCardEditor extends LitElement {
       `;
     }
 
+    // Next best: HA selector (newer versions provide a navigation selector)
     if (customElements.get("ha-selector")) {
       return html`
         <ha-selector
@@ -1967,6 +2213,7 @@ class HkiNavigationCardEditor extends LitElement {
       `;
     }
 
+    // Fallback: plain text field
     return html`
       <ha-textfield
         .label=${label}
@@ -1996,6 +2243,7 @@ class HkiNavigationCardEditor extends LitElement {
       this.requestUpdate();
     };
 
+    // Best: HA YAML editor (this is what gives entity autocomplete inside YAML)
     if (customElements.get("ha-yaml-editor")) {
       return html`
         <div class="code-wrap">
@@ -2014,6 +2262,7 @@ class HkiNavigationCardEditor extends LitElement {
       `;
     }
 
+    // Next best: code editor
     if (customElements.get("ha-code-editor")) {
       return html`
         <div class="code-wrap">
@@ -2033,6 +2282,7 @@ class HkiNavigationCardEditor extends LitElement {
       `;
     }
 
+    // Fallback
     return html`
       <ha-textarea
         .label=${label}
@@ -2056,6 +2306,7 @@ class HkiNavigationCardEditor extends LitElement {
       const current = btn?.[which] || { action: "none" };
       const next = { ...btn, [which]: { ...current, ...patch } };
 
+      // If tap_action becomes back, force icon value in config too
       if (which === "tap_action" && patch.action === "back") {
         next.icon = "mdi:chevron-left";
       }
@@ -2077,7 +2328,9 @@ class HkiNavigationCardEditor extends LitElement {
         </ha-select>
 
         ${type === "navigate"
-          ? html`${this._renderNavigationPathPicker("Navigation path", act.navigation_path || "", (v) => update({ navigation_path: v }))}`
+          ? html`
+              ${this._renderNavigationPathPicker("Navigation path", act.navigation_path || "", (v) => update({ navigation_path: v }))}
+            `
           : html``}
 
         ${type === "url"
@@ -2145,7 +2398,7 @@ class HkiNavigationCardEditor extends LitElement {
           : html``}
 
         ${type === "toggle" || type === "more-info"
-          ? html`<div class="hint">Uses the button's <b>Entity</b> field.</div>`
+          ? html`<div class="hint">Uses the button’s <b>Entity</b> field.</div>`
           : html``}
 
         ${type === "back"
@@ -2180,9 +2433,12 @@ class HkiNavigationCardEditor extends LitElement {
     };
 
     const parseCsv = (s) =>
-      safeString(s).split(",").map((x) => x.trim()).filter(Boolean);
+      safeString(s)
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
 
-    const csvString = (arr) => Array.isArray(arr) ? arr.join(", ") : "";
+    const csvString = (arr) => (Array.isArray(arr) ? arr.join(", ") : "");
 
     return html`
       <div class="subsection">
@@ -2260,7 +2516,9 @@ class HkiNavigationCardEditor extends LitElement {
                         @selected=${(e) => setCond(cond.id, { operator: e.target.value })}
                         @closed=${(e) => e.stopPropagation()}
                       >
-                        ${ENTITY_OPERATORS.map((o) => html`<mwc-list-item .value=${o.value}>${o.label}</mwc-list-item>`)}
+                        ${ENTITY_OPERATORS.map(
+                          (o) => html`<mwc-list-item .value=${o.value}>${o.label}</mwc-list-item>`
+                        )}
                       </ha-select>
 
                       ${(cond.operator === "exists" || cond.operator === "not_exists")
@@ -2323,7 +2581,8 @@ class HkiNavigationCardEditor extends LitElement {
     const hasIconPicker = !!customElements.get("ha-icon-picker");
     const effectiveType = (() => {
       const v = safeString(btn.button_type).trim();
-      return v && BUTTON_TYPE_VALUES.has(v) ? v : INHERIT;
+      if (v && BUTTON_TYPES.some((t) => t.value === v)) return v;
+      return INHERIT;
     })();
 
     const pillTypeSelected = effectiveType === "pill" || effectiveType === "pill_label";
@@ -2531,7 +2790,11 @@ class HkiNavigationCardEditor extends LitElement {
         <ha-expansion-panel
           .expanded=${expanded}
           @expanded-changed=${(e) => {
-            const next = e.detail?.value ?? e.detail?.expanded ?? e.target?.expanded ?? false;
+            const next =
+              e.detail?.value ??
+              e.detail?.expanded ??
+              e.target?.expanded ??
+              false;
             this._expanded[key] = !!next;
             this.requestUpdate();
           }}
@@ -2562,6 +2825,9 @@ class HkiNavigationCardEditor extends LitElement {
     const gapX = Math.max(6, Math.min(14, Number(c.gap || 10)));
     const gapY = Math.max(6, Math.min(14, Number(c.vertical_gap || c.gap || 10)));
 
+    const showH = true; // show even if disabled (preview helps “menu popup” configuration)
+    const showV = true;
+
     const previewW = 360;
     const previewH = 170;
 
@@ -2570,6 +2836,7 @@ class HkiNavigationCardEditor extends LitElement {
       if (t === "pill" || t === "pill_label") {
         const pw = _hasMeaningfulNumber(b?.pill_width) ? Number(b.pill_width) : Number(c.pill_width || 0);
         if (pw > 0) return Math.max(MIN_PILL_WIDTH, pw) * (size / c.button_size);
+        // auto: approximate based on label length
         const label = (b.label || b.tooltip || "").trim();
         const approx = Math.max(MIN_PILL_WIDTH, 70 + label.length * 7);
         return approx * (size / c.button_size);
@@ -2586,7 +2853,11 @@ class HkiNavigationCardEditor extends LitElement {
       return html`
         <div
           class="pbtn ${isPill ? "pbtn-pill" : ""}"
-          style="width:${w}px; height:${size}px; opacity:${dim ? 0.35 : 1};"
+          style="
+            width:${w}px;
+            height:${size}px;
+            opacity:${dim ? 0.35 : 1};
+          "
         >
           <ha-icon class="picon" .icon=${icon}></ha-icon>
           ${(isPill && (b.label || b.tooltip))
@@ -2600,10 +2871,12 @@ class HkiNavigationCardEditor extends LitElement {
     const cols = Math.max(1, c.horizontal.columns || 6);
     const rows = Math.max(1, c.vertical.rows || 6);
 
-    const itemsH = [base, ...hb];
-    const itemsV = vb;
+    const itemsH = [base, ...(showH ? hb : [])];
+    const itemsV = showV ? vb : [];
 
+    // Layout anchored to bottom-right/left/center inside preview
     const pos = c.position;
+
     const children = [];
 
     if (pos === "bottom-center") {
@@ -2616,6 +2889,7 @@ class HkiNavigationCardEditor extends LitElement {
     } else {
       const isRight = pos === "bottom-right";
 
+      // base at corner
       const baseX = isRight ? (previewW - baseW) : 0;
       const baseY = previewH - size;
 
@@ -2623,283 +2897,472 @@ class HkiNavigationCardEditor extends LitElement {
         ${renderMiniBtn(base, false)}
       </div>`);
 
-      let hAcc = isRight ? (previewW - baseW - gapX) : (baseW + gapX);
-      let rowIdx = 0;
+      // Horizontal: build outward
+      let xCursor = isRight ? (baseX - gapX) : (baseX + baseW + gapX);
+      let row = 0;
+      let col = 0;
+
       for (let i = 0; i < hb.length; i++) {
         const b = hb[i];
         const w = btnWidth(b);
-        const y = previewH - size - rowIdx * (size + gapY);
-        const x = isRight ? (hAcc - w) : hAcc;
+
+        // wrap
+        if (col >= cols) {
+          col = 0;
+          row += 1;
+          xCursor = isRight ? (baseX - gapX) : (baseX + baseW + gapX);
+        }
+
+        const y = baseY - (row * (size + gapY));
+        const x = isRight ? (xCursor - w) : xCursor;
 
         children.push(html`<div class="pabs" style="left:${x}px; top:${y}px;">
           ${renderMiniBtn(b, !c.horizontal.enabled)}
         </div>`);
 
-        if (isRight) {
-          hAcc -= (w + gapX);
-        } else {
-          hAcc += (w + gapX);
-        }
-
-        if ((i + 1) % cols === 0) {
-          rowIdx++;
-          hAcc = isRight ? (previewW - baseW - gapX) : (baseW + gapX);
-        }
+        xCursor = isRight ? (x - gapX) : (x + w + gapX);
+        col += 1;
       }
 
-      let vRowIdx = 1;
-      let wrapCol = 0;
+      // Vertical: build upward from base edge
+      let vy = baseY - (size + gapY);
+      let vcount = 0;
       for (let j = 0; j < vb.length; j++) {
         const b = vb[j];
         const w = btnWidth(b);
-        const y = previewH - size - vRowIdx * (size + gapY);
-        const x = isRight ? (previewW - w - wrapCol * (size + gapX)) : (wrapCol * (size + gapX));
+
+        // wrap into columns if exceed rows
+        const r = (vcount % rows);
+        const wrapCol = Math.floor(vcount / rows);
+
+        const y = baseY - ((r + 1) * (size + gapY));
+        let x;
+
+        if (wrapCol === 0) {
+          // align end of pill with end of base when on right
+          x = isRight ? (baseX + baseW - w) : baseX;
+        } else {
+          // place next to horizontal block
+          const block = Math.max(0, Math.abs(baseX - 0));
+          x = isRight ? (baseX - (wrapCol * (MIN_PILL_WIDTH * (size / c.button_size) + gapX)) - w) : (baseX + baseW + (wrapCol * (MIN_PILL_WIDTH * (size / c.button_size) + gapX)));
+        }
 
         children.push(html`<div class="pabs" style="left:${x}px; top:${y}px;">
           ${renderMiniBtn(b, !c.vertical.enabled)}
         </div>`);
 
-        vRowIdx++;
-        if (vRowIdx > rows) {
-          vRowIdx = 1;
-          wrapCol++;
-        }
+        vcount += 1;
       }
     }
 
     return html`
-      <div class="previewbox" style="width:${previewW}px; height:${previewH}px;">
-        ${children}
+      <div class="section">
+        <div class="section-title">Preview</div>
+        <div class="previewbox" style="width:${previewW}px; height:${previewH}px;">
+          ${children}
+        </div>
+        <div class="hint">Preview is approximate (fixed-position card), but helps while editing.</div>
       </div>
     `;
   }
 
   _renderGroup(group) {
     const c = this._c;
-    const g = group === "vertical" ? c.vertical : c.horizontal;
-    const buttons = g.buttons || [];
-    const enabledKey = `${group}.enabled`;
-    const countKey = group === "vertical" ? "rows" : "columns";
+    const gKey = group === "vertical" ? "vertical" : "horizontal";
+    const enabled = !!c[gKey].enabled;
+    const buttons = this._getButtons(group);
+
+    const centerHidden = c.position === "bottom-center" && group === "vertical";
+
+    const tip = html`
+      <ha-alert alert-type="info">
+        Tip: If you disable this group, you can still configure its buttons and open it temporarily using the
+        <b>Show/Hide Group</b> action. It auto-closes after a button is pressed.
+      </ha-alert>
+    `;
+
+    const centerWarn = centerHidden
+      ? html`<ha-alert alert-type="warning">
+          Vertical group is <b>always hidden</b> when Position is <b>Bottom center</b>.
+          You can still configure it, but it won’t be displayed.
+        </ha-alert>`
+      : html``;
 
     return html`
       <div class="section">
         <div class="section-title row">
           <span>${group === "vertical" ? "Vertical group" : "Horizontal group"}</span>
-          <ha-formfield .label=${"Enabled"}>
-            <ha-switch
-              .checked=${g.enabled}
-              @change=${(e) => this._setBool(enabledKey, e.target.checked)}
-            ></ha-switch>
-          </ha-formfield>
+          <mwc-button @click=${() => this._addButton(group)} outlined>
+            <ha-icon icon="mdi:plus"></ha-icon>&nbsp;Add button
+          </mwc-button>
         </div>
 
-        <ha-textfield
-          type="number"
-          min="1"
-          .label=${group === "vertical" ? "Rows per column" : "Columns per row"}
-          .value=${String(g[countKey] || 6)}
-          @change=${(e) => {
-            const cfg = deepClone(this._c);
-            cfg[group][countKey] = Math.max(1, Number(e.target.value) || 6);
-            this._emit(cfg);
-          }}
-        ></ha-textfield>
+        ${tip}
+        ${centerWarn}
+
+        <div class="grid2">
+          <ha-formfield .label=${"Enabled"}>
+            <ha-switch
+              .checked=${!!enabled}
+              @change=${(e) => this._setBool(`${gKey}.enabled`, e.target.checked)}
+            ></ha-switch>
+          </ha-formfield>
+
+          ${group === "horizontal"
+            ? html`
+                <ha-textfield
+                  type="number"
+                  .label=${"Columns"}
+                  .value=${String(c.horizontal.columns)}
+                  @change=${(e) => {
+                    const cfg = deepClone(this._c);
+                    cfg.horizontal.columns = Math.max(1, Number(e.target.value));
+                    this._emit(cfg);
+                  }}
+                ></ha-textfield>
+              `
+            : html`
+                <ha-textfield
+                  type="number"
+                  .label=${"Rows"}
+                  .value=${String(c.vertical.rows)}
+                  @change=${(e) => {
+                    const cfg = deepClone(this._c);
+                    cfg.vertical.rows = Math.max(1, Number(e.target.value));
+                    this._emit(cfg);
+                  }}
+                ></ha-textfield>
+              `}
+        </div>
 
         ${buttons.length === 0
-          ? html`<div class="empty">No buttons in this group yet.</div>`
-          : buttons.map((btn, idx) => {
-              const key = `${group}:${btn.id}`;
-              const expanded = !!this._expanded[key];
-              const setBtn = (patch) => this._setButtonById(group, btn.id, patch);
+          ? html`<div class="empty">No buttons yet — click “Add button”.</div>`
+          : html``}
 
-              return html`
-                <ha-expansion-panel
-                  .expanded=${expanded}
-                  @expanded-changed=${(e) => {
-                    const next = e.detail?.value ?? e.detail?.expanded ?? e.target?.expanded ?? false;
-                    this._expanded[key] = !!next;
-                    this.requestUpdate();
-                  }}
-                >
-                  <div slot="header" class="btn-header">
-                    <ha-icon .icon=${btn.icon || "mdi:circle"}></ha-icon>
-                    <div class="btn-header-text">
-                      <div class="btn-title">${btn.label || btn.tooltip || `Button ${idx + 1}`}</div>
-                      <div class="btn-sub">${btn.icon || ""}${btn.entity ? ` • ${btn.entity}` : ""}</div>
-                    </div>
-                    <div class="btn-actions">
-                      <mwc-icon-button title="Move up" @click=${(e) => { e.stopPropagation(); this._moveButtonById(group, btn.id, -1); }}>
-                        <ha-icon icon="mdi:arrow-up"></ha-icon>
-                      </mwc-icon-button>
-                      <mwc-icon-button title="Move down" @click=${(e) => { e.stopPropagation(); this._moveButtonById(group, btn.id, 1); }}>
-                        <ha-icon icon="mdi:arrow-down"></ha-icon>
-                      </mwc-icon-button>
-                      <mwc-icon-button title="Remove" @click=${(e) => { e.stopPropagation(); this._removeButtonById(group, btn.id); }}>
-                        <ha-icon icon="mdi:trash-can-outline"></ha-icon>
-                      </mwc-icon-button>
-                    </div>
-                  </div>
+        ${buttons.map((btn, idx) => {
+          const btnId = btn.id || "no_id";
+          const key = `${group}:${btnId}`;
+          const title = btn.label || btn.tooltip || `Button`;
+          const expanded = !!this._expanded[key];
 
-                  <div class="panel">
-                    ${this._renderButtonPanel(btn, setBtn, key, true)}
-                  </div>
-                </ha-expansion-panel>
-              `;
-            })}
+          const setBtn = (nextBtn) => this._setButtonById(group, btnId, nextBtn);
 
-        <mwc-button outlined @click=${() => this._addButton(group)}>
-          <ha-icon icon="mdi:plus"></ha-icon>&nbsp;Add button
-        </mwc-button>
+          return html`
+            <ha-expansion-panel
+              .expanded=${expanded}
+              @expanded-changed=${(e) => {
+                const next =
+                  e.detail?.value ??
+                  e.detail?.expanded ??
+                  e.target?.expanded ??
+                  false;
+                this._expanded[key] = !!next;
+                this.requestUpdate();
+              }}
+            >
+              <div slot="header" class="btn-header">
+                <ha-icon .icon=${btn.icon || "mdi:circle"}></ha-icon>
+                <div class="btn-header-text">
+                  <div class="btn-title">${title}</div>
+                  <div class="btn-sub">${btn.icon || ""}${btn.entity ? ` • ${btn.entity}` : ""}</div>
+                </div>
+                <div class="btn-actions">
+                  <mwc-icon-button
+                    title="Move up"
+                    ?disabled=${idx === 0}
+                    @click=${(e) => { e.stopPropagation(); this._moveButtonById(group, btnId, -1); }}
+                  >
+                    <ha-icon icon="mdi:chevron-up"></ha-icon>
+                  </mwc-icon-button>
+
+                  <mwc-icon-button
+                    title="Move down"
+                    ?disabled=${idx === buttons.length - 1}
+                    @click=${(e) => { e.stopPropagation(); this._moveButtonById(group, btnId, 1); }}
+                  >
+                    <ha-icon icon="mdi:chevron-down"></ha-icon>
+                  </mwc-icon-button>
+
+                  <mwc-icon-button
+                    title="Delete"
+                    @click=${(e) => { e.stopPropagation(); this._removeButtonById(group, btnId); }}
+                  >
+                    <ha-icon icon="mdi:trash-can-outline"></ha-icon>
+                  </mwc-icon-button>
+                </div>
+              </div>
+
+              <div class="panel">
+                ${this._renderButtonPanel(btn, setBtn, key, true)}
+              </div>
+            </ha-expansion-panel>
+          `;
+        })}
       </div>
     `;
   }
 
   render() {
+    if (!this.hass || !this._config) return html``;
+
     const c = this._c;
+    const showCenterOptions = c.position === "bottom-center";
+    const showPillWidthGlobal = c.default_button_type === "pill" || c.default_button_type === "pill_label";
 
     return html`
       <div class="editor">
-        <div class="section doc">
-          <div class="doc-title">HKI Navigation Card</div>
-          ${this._renderPreview()}
-        </div>
+        <ha-alert alert-type="warning" class="doc">
+          <div class="doc-title">Warning</div>
+          <div>
+            This card uses fixed positions on your screen, to edit this card you will have to click on the placeholder card in the section where you have placed this card.<br><br>
+            Please read the documentation at github.com/jimz011/hki-navigation-card to set up this card.<br><br>
+            This card may contain bugs. Use at your own risk!
+          </div>
+        </ha-alert>
 
         <div class="section">
           <div class="section-title">Layout</div>
 
-          <ha-select
-            .label=${"Position"}
-            .value=${c.position}
-            @selected=${(e) => this._setValue("position", e.target.value)}
-            @closed=${(e) => e.stopPropagation()}
-          >
-            <mwc-list-item value="bottom-left">Bottom Left</mwc-list-item>
-            <mwc-list-item value="bottom-center">Bottom Center</mwc-list-item>
-            <mwc-list-item value="bottom-right">Bottom Right</mwc-list-item>
-          </ha-select>
-
           <div class="grid2">
-            <ha-textfield type="number" .label=${"Offset X"} .value=${String(c.offset_x)}
+            <ha-select
+              .label=${"Position"}
+              .value=${c.position}
+              @selected=${(e) => this._setValue("position", e.target.value)}
+              @closed=${(e) => e.stopPropagation()}
+            >
+              <mwc-list-item value="bottom-left">Bottom left</mwc-list-item>
+              <mwc-list-item value="bottom-center">Bottom center</mwc-list-item>
+              <mwc-list-item value="bottom-right">Bottom right</mwc-list-item>
+            </ha-select>
+
+            <ha-textfield type="number" .label=${"Offset X (px)"} .value=${String(c.offset_x)}
               @change=${(e) => this._setValue("offset_x", Number(e.target.value))}></ha-textfield>
 
-            <ha-textfield type="number" .label=${"Offset Y"} .value=${String(c.offset_y)}
+            <ha-textfield type="number" .label=${"Offset Y (px)"} .value=${String(c.offset_y)}
               @change=${(e) => this._setValue("offset_y", Number(e.target.value))}></ha-textfield>
 
-            <ha-textfield type="number" .label=${"Button size"} .value=${String(c.button_size)}
-              @change=${(e) => this._setValue("button_size", Math.max(36, Number(e.target.value)))}></ha-textfield>
+            <div style="grid-column: 1/-1; margin-top: 8px;">
+              <details>
+                <summary style="cursor: pointer; user-select: none; padding: 8px 0; color: var(--primary-text-color); font-weight: 500;">
+                  ⚙️ Advanced: Screen-size-specific offsets (optional)
+                </summary>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; padding: 12px; background: rgba(var(--rgb-primary-text-color), 0.05); border-radius: 8px;">
+                  <div class="hint" style="grid-column: 1/-1; margin: 0 0 8px 0;">
+                    Override the base Offset X for specific screen sizes. Leave blank to use the base offset. This is probably only useful when buttons are positioned on the left.
+                  </div>
+                  
+                  <ha-textfield
+                    type="number"
+                    .label=${"Mobile offset X (< 768px)"}
+                    .value=${c.offset_x_mobile !== undefined && c.offset_x_mobile !== null ? String(c.offset_x_mobile) : ""}
+                    placeholder="Uses base offset X"
+                    @change=${(e) => {
+                      const val = e.target.value.trim();
+                      this._setValue("offset_x_mobile", val === "" ? null : Number(val));
+                    }}
+                  ></ha-textfield>
 
-            <ha-textfield type="number" .label=${"Gap (horizontal)"} .value=${String(c.gap)}
-              @change=${(e) => this._setValue("gap", Math.max(0, Number(e.target.value)))}></ha-textfield>
+                  <ha-textfield
+                    type="number"
+                    .label=${"Tablet offset X (768-1024px)"}
+                    .value=${c.offset_x_tablet !== undefined && c.offset_x_tablet !== null ? String(c.offset_x_tablet) : ""}
+                    placeholder="Uses base offset X"
+                    @change=${(e) => {
+                      const val = e.target.value.trim();
+                      this._setValue("offset_x_tablet", val === "" ? null : Number(val));
+                    }}
+                  ></ha-textfield>
 
-            <ha-textfield type="number" .label=${"Gap (vertical)"} .value=${String(c.vertical_gap)}
-              @change=${(e) => this._setValue("vertical_gap", Math.max(0, Number(e.target.value)))}></ha-textfield>
+                  <ha-textfield
+                    type="number"
+                    .label=${"Desktop offset X (> 1024px)"}
+                    .value=${c.offset_x_desktop !== undefined && c.offset_x_desktop !== null ? String(c.offset_x_desktop) : ""}
+                    placeholder="Uses base offset X"
+                    @change=${(e) => {
+                      const val = e.target.value.trim();
+                      this._setValue("offset_x_desktop", val === "" ? null : Number(val));
+                    }}
+                  ></ha-textfield>
+                </div>
+              </details>
+            </div>
+
+            <ha-textfield type="number" .label=${"Button size (px)"} .value=${String(c.button_size)}
+              @change=${(e) => this._setValue("button_size", Number(e.target.value))}></ha-textfield>
+
+            <ha-textfield type="number" .label=${"Horizontal gap (px)"} .value=${String(c.gap)}
+              @change=${(e) => this._setValue("gap", Number(e.target.value))}></ha-textfield>
+
+            <ha-textfield type="number" .label=${"Vertical gap (px)"} .value=${String(c.vertical_gap)}
+              @change=${(e) => this._setValue("vertical_gap", Number(e.target.value))}></ha-textfield>
+
+            <ha-textfield .label=${"Button box-shadow (CSS)"} .value=${c.button_box_shadow || ""}
+              @change=${(e) => this._setValue("button_box_shadow", e.target.value)}></ha-textfield>
+
+            <ha-textfield .label=${"Button box-shadow hover (CSS)"} .value=${c.button_box_shadow_hover || ""}
+              @change=${(e) => this._setValue("button_box_shadow_hover", e.target.value)}></ha-textfield>
 
             <ha-textfield type="number" .label=${"Z-index"} .value=${String(c.z_index)}
               @change=${(e) => this._setValue("z_index", Number(e.target.value))}></ha-textfield>
           </div>
 
-          ${c.position === "bottom-center"
+          ${showCenterOptions
             ? html`
-                <ha-formfield .label=${"Spread buttons across full width"}>
-                  <ha-switch
-                    .checked=${c.center_spread}
-                    @change=${(e) => this._setValue("center_spread", e.target.checked)}
-                  ></ha-switch>
-                </ha-formfield>
+                <div class="subsection">
+                  <div class="subheader">Center options</div>
+                  <div class="grid2">
+                    <ha-formfield .label=${"Spread buttons across width"}>
+                      <ha-switch
+                        .checked=${!!c.center_spread}
+                        @change=${(e) => this._setValue("center_spread", e.target.checked)}
+                      ></ha-switch>
+                    </ha-formfield>
+                    <div class="hint">
+                      When enabled, the base + horizontal buttons spread across the full width.
+                    </div>
+                  </div>
+                </div>
               `
             : html``}
 
           <div class="subsection">
-            <div class="subheader">Screen-size offsets (optional overrides)</div>
-            <div class="grid2">
-              <ha-textfield type="number"
-                .label=${"Mobile offset X (< 768px) — blank = use base"}
-                .value=${c.offset_x_mobile ?? ""}
-                @change=${(e) => {
-                  const v = safeString(e.target.value).trim();
-                  this._setValue("offset_x_mobile", v === "" ? null : Number(v));
-                }}></ha-textfield>
-
-              <ha-textfield type="number"
-                .label=${"Tablet offset X (768-1024px) — blank = use base"}
-                .value=${c.offset_x_tablet ?? ""}
-                @change=${(e) => {
-                  const v = safeString(e.target.value).trim();
-                  this._setValue("offset_x_tablet", v === "" ? null : Number(v));
-                }}></ha-textfield>
-
-              <ha-textfield type="number"
-                .label=${"Desktop offset X (> 1024px) — blank = use base"}
-                .value=${c.offset_x_desktop ?? ""}
-                @change=${(e) => {
-                  const v = safeString(e.target.value).trim();
-                  this._setValue("offset_x_desktop", v === "" ? null : Number(v));
-                }}></ha-textfield>
+            <div class="subheader">
+              Bottom bar (cosmetic)
+              <span style="margin-left: 8px; padding: 2px 8px; background: rgba(255, 165, 0, 0.2); color: orange; border-radius: 4px; font-size: 11px; font-weight: 600; vertical-align: middle;">
+                ⚠️ EXPERIMENTAL
+              </span>
             </div>
-          </div>
-
-          <div class="subsection">
-            <div class="subheader">Bottom bar (cosmetic background)</div>
             <div class="grid2">
               <ha-formfield .label=${"Enable bottom bar"}>
                 <ha-switch
-                  .checked=${c.bottom_bar_enabled}
-                  @change=${(e) => this._setValue("bottom_bar_enabled", e.target.checked)}
+                  .checked=${!!c.bottom_bar_enabled}
+                  @change=${(e) => this._setBool("bottom_bar_enabled", e.target.checked)}
                 ></ha-switch>
               </ha-formfield>
 
-              ${c.bottom_bar_enabled
-                ? html`
-                    <ha-formfield .label=${"Full width (ignore button bounds)"}>
-                      <ha-switch
-                        .checked=${c.bottom_bar_full_width}
-                        @change=${(e) => this._setValue("bottom_bar_full_width", e.target.checked)}
-                      ></ha-switch>
-                    </ha-formfield>
+              ${c.bottom_bar_enabled ? html`
+                ${c.position === "bottom-center" ? html`
+                  <ha-formfield .label=${"Span full width"}>
+                    <ha-switch
+                      .checked=${!!c.bottom_bar_full_width}
+                      @change=${(e) => this._setBool("bottom_bar_full_width", e.target.checked)}
+                    ></ha-switch>
+                  </ha-formfield>
+                ` : html`
+                  <div class="hint" style="padding: 8px; background: rgba(255, 165, 0, 0.1); border-radius: 8px;">
+                    ℹ️ Non-full-width bar only available with center alignment. Bar will span full width.
+                  </div>
+                `}
 
-                    <ha-textfield type="number" .label=${"Height (px)"} .value=${String(c.bottom_bar_height)}
-                      @change=${(e) => this._setValue("bottom_bar_height", Math.max(0, Number(e.target.value)))}></ha-textfield>
+                <ha-textfield
+                  type="number"
+                  .label=${"Bottom bar height (px)"}
+                  .value=${String(c.bottom_bar_height)}
+                  @change=${(e) => this._setValue("bottom_bar_height", Number(e.target.value))}
+                ></ha-textfield>
 
-                    <ha-textfield .label=${"Color"} .value=${c.bottom_bar_color}
-                      @change=${(e) => this._setValue("bottom_bar_color", e.target.value)}></ha-textfield>
+              <ha-textfield
+                type="number"
+                .label=${"Bottom bar bottom offset (px)"}
+                .value=${String(c.bottom_bar_bottom_offset)}
+                
+                @change=${(e) => this._setValue("bottom_bar_bottom_offset", Number(e.target.value))}
+              ></ha-textfield>
 
-                    <ha-textfield type="number" step="0.01" min="0" max="1" .label=${"Opacity"}
-                      .value=${String(c.bottom_bar_opacity)}
-                      @change=${(e) => this._setValue("bottom_bar_opacity", Math.max(0, Math.min(1, Number(e.target.value))))}></ha-textfield>
+              <ha-textfield
+                type="number"
+                .label=${"Bottom bar border radius (px)"}
+                .value=${String(c.bottom_bar_border_radius)}
+                
+                @change=${(e) => this._setValue("bottom_bar_border_radius", Number(e.target.value))}
+              ></ha-textfield>
 
-                    <ha-textfield type="number" .label=${"Border radius (px)"} .value=${String(c.bottom_bar_border_radius)}
-                      @change=${(e) => this._setValue("bottom_bar_border_radius", Math.max(0, Number(e.target.value)))}></ha-textfield>
+              <ha-textfield
+                .label=${"Bottom bar box-shadow (CSS)"}
+                .value=${c.bottom_bar_box_shadow || ""}
+                
+                @change=${(e) => this._setValue("bottom_bar_box_shadow", e.target.value)}
+              ></ha-textfield>
 
-                    <ha-textfield type="number" .label=${"Bottom offset (px)"} .value=${String(c.bottom_bar_bottom_offset)}
-                      @change=${(e) => this._setValue("bottom_bar_bottom_offset", Number(e.target.value))}></ha-textfield>
+              <ha-textfield
+                .label=${"Bottom bar color (CSS)"}
+                .value=${c.bottom_bar_color || ""}
+                
+                @change=${(e) => this._setValue("bottom_bar_color", e.target.value)}
+              ></ha-textfield>
 
-                    <ha-textfield .label=${"Box shadow (CSS)"} .value=${c.bottom_bar_box_shadow || ""}
-                      @change=${(e) => this._setValue("bottom_bar_box_shadow", e.target.value)}></ha-textfield>
+              <ha-textfield
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
+                .label=${"Bottom bar opacity (0..1)"}
+                .value=${String(c.bottom_bar_opacity ?? 1)}
+                
+                @change=${(e) => this._setValue("bottom_bar_opacity", Number(e.target.value))}
+              ></ha-textfield>
 
-                    <ha-textfield type="number" .label=${"Margin left (px)"} .value=${String(c.bottom_bar_margin_left)}
-                      @change=${(e) => this._setValue("bottom_bar_margin_left", Number(e.target.value))}></ha-textfield>
+              <ha-textfield
+                type="number"
+                .label=${"Inset left (px)"}
+                .value=${String(c.bottom_bar_margin_left ?? 0)}
+                
+                @change=${(e) => this._setValue("bottom_bar_margin_left", Number(e.target.value))}
+              ></ha-textfield>
 
-                    <ha-textfield type="number" .label=${"Margin right (px)"} .value=${String(c.bottom_bar_margin_right)}
-                      @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}></ha-textfield>
+              <ha-textfield
+                type="number"
+                .label=${"Inset right (px)"}
+                .value=${String(c.bottom_bar_margin_right ?? 0)}
+                
+                @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}
+              ></ha-textfield>
 
-                    <ha-textfield type="number" .label=${"Border width (px)"} .value=${String(c.bottom_bar_border_width)}
-                      @change=${(e) => this._setValue("bottom_bar_border_width", Math.max(0, Number(e.target.value)))}></ha-textfield>
+              ${!c.bottom_bar_full_width ? html`
+                <ha-textfield
+                  type="number"
+                  .label=${"Border width (px)"}
+                  .value=${String(c.bottom_bar_border_width ?? 0)}
+                  
+                  @change=${(e) => this._setValue("bottom_bar_border_width", Number(e.target.value))}
+                ></ha-textfield>
+              ` : ''}
 
-                    <ha-textfield .label=${"Border style"} .value=${c.bottom_bar_border_style}
-                      @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}></ha-textfield>
+              ${!c.bottom_bar_full_width ? html`
+                <ha-textfield
+                  .label=${"Border style"}
+                  .value=${c.bottom_bar_border_style || "solid"}
+                  placeholder="solid, dashed, dotted, etc."
+                  
+                  @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}
+                ></ha-textfield>
+              ` : ''}
 
-                    <ha-textfield .label=${"Border color"} .value=${c.bottom_bar_border_color || ""}
-                      @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}></ha-textfield>
-                  `
-                : html``}
+              ${!c.bottom_bar_full_width ? html`
+                <ha-textfield
+                  .label=${"Border color (CSS)"}
+                  .value=${c.bottom_bar_border_color || ""}
+                  placeholder="(optional)"
+                  
+                  @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}
+                ></ha-textfield>
+              ` : ''}
+
+              <div class="hint">
+                Purely visual. The bar wraps buttons (center alignment only) or spans full width (left/right). Positive inset values extend the bar beyond buttons when wrapping, or shrink it when full-width is enabled. Negative values do the opposite. Does not affect click behavior.
+              </div>
+              ` : ''}
             </div>
           </div>
 
           <div class="subsection">
-            <div class="subheader">Button appearance defaults</div>
+            <div class="hint" style="padding: 8px; background: rgba(255, 165, 0, 0.1); border-radius: 8px; border-left: 3px solid orange;">
+              ⚠️ Note: Global settings will only apply to buttons that have their values set to "inherit" (blank fields in button configuration).
+            </div>
+            <div class="subheader">Defaults</div>
             <div class="grid2">
               <ha-select
-                .label=${"Default button type"}
+                .label=${"Default Button Type"}
                 .value=${c.default_button_type}
                 @selected=${(e) => this._setValue("default_button_type", e.target.value)}
                 @closed=${(e) => e.stopPropagation()}
@@ -2907,29 +3370,19 @@ class HkiNavigationCardEditor extends LitElement {
                 ${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}
               </ha-select>
 
-              <ha-textfield
-                type="number"
-                .label=${`Global pill width (px) — 0 = auto (min ${MIN_PILL_WIDTH})`}
-                .value=${String(c.pill_width ?? 0)}
-                @change=${(e) => this._setGlobalPillWidth(e.target.value)}
-              ></ha-textfield>
+              ${showPillWidthGlobal
+                ? html`
+                    <ha-textfield
+                      type="number"
+                      .label=${`Global pill width (px) — 0 = auto (min ${MIN_PILL_WIDTH})`}
+                      .value=${String(c.pill_width || 0)}
+                      @change=${(e) => this._setGlobalPillWidth(Number(e.target.value))}
+                    ></ha-textfield>
+                  `
+                : html`<div class="hint">Global pill width appears when Default Button Type is a pill type.</div>`}
 
               <ha-textfield
-                .label=${"Button box-shadow (CSS)"}
-                .value=${c.button_box_shadow || ""}
-                placeholder="0 8px 24px rgba(0,0,0,0.35)"
-                @change=${(e) => this._setValue("button_box_shadow", e.target.value)}
-              ></ha-textfield>
-
-              <ha-textfield
-                .label=${"Button box-shadow hover (CSS)"}
-                .value=${c.button_box_shadow_hover || ""}
-                placeholder="0 10px 30px rgba(0,0,0,0.42)"
-                @change=${(e) => this._setValue("button_box_shadow_hover", e.target.value)}
-              ></ha-textfield>
-
-              <ha-textfield
-                .label=${"Default button background (optional override)"}
+                .label=${"Default background (optional override)"}
                 .value=${c.default_background || ""}
                 placeholder="(blank = theme accent/primary)"
                 @change=${(e) => this._setDefaultBackground(e.target.value)}
@@ -3109,7 +3562,7 @@ class HkiNavigationCardEditor extends LitElement {
   }
 }
 
-customElements.define(CARD_TYPE, HkiNavigationCard);
+customElements.define(CARD_TAG, HkiNavigationCard);
 customElements.define(EDITOR_TAG, HkiNavigationCardEditor);
 
 HkiNavigationCard.getConfigElement = () => document.createElement(EDITOR_TAG);
