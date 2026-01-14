@@ -21,7 +21,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.0.2";
+const VERSION = "1.0.3"; // Bumped version
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -404,6 +404,7 @@ const DEFAULTS = {
   buttons: undefined,
   default_label_position: undefined,
   default_show_label: undefined,
+  reserve_space: false,
 };
 
 function ensureButtonIdsInList(list) {
@@ -544,6 +545,8 @@ function normalizeConfig(cfg) {
   c.offset_x_mobile = (raw.offset_x_mobile !== undefined && raw.offset_x_mobile !== null && raw.offset_x_mobile !== "") ? Number(raw.offset_x_mobile) : null;
   c.offset_x_tablet = (raw.offset_x_tablet !== undefined && raw.offset_x_tablet !== null && raw.offset_x_tablet !== "") ? Number(raw.offset_x_tablet) : null;
   c.offset_x_desktop = (raw.offset_x_desktop !== undefined && raw.offset_x_desktop !== null && raw.offset_x_desktop !== "") ? Number(raw.offset_x_desktop) : null;
+
+  c.reserve_space = !!raw.reserve_space;
 
   {
     const [hb] = ensureButtonIdsInList(c.horizontal.buttons);
@@ -1387,6 +1390,17 @@ class HkiNavigationCard extends LitElement {
     const offsetX = this._computeOffsetX();
     const offsetY = c.offset_y;
 
+    let spacerHtml = html``;
+    if (c.reserve_space) {
+        let heightNeeded = 0;
+        if (c.bottom_bar_enabled) {
+            heightNeeded = (c.bottom_bar_height || DEFAULTS.bottom_bar_height) + (c.bottom_bar_bottom_offset || 0);
+        } else {
+            heightNeeded = c.button_size + offsetY + 10;
+        }
+        spacerHtml = html`<div class="hki-spacer" style="height: ${heightNeeded}px; width: 100%; clear: both;"></div>`;
+    }
+
     const anchorStyle = (() => {
       if (c.position === "bottom-center") {
         if (c.center_spread) return `left:0px; right:0px; bottom:${offsetY}px;`;
@@ -1433,6 +1447,7 @@ class HkiNavigationCard extends LitElement {
       const padRight = c.center_spread ? `${(this._contentRightMargin || 0) + offsetX}px` : "0px";
 
       return html`
+        ${spacerHtml}
         ${placeholder}
         ${this._renderBottomBar()}
         <div class="fab-anchor" style="${anchorStyle} z-index:${c.z_index}; --hki-size:${c.button_size}px; --hki-gap:${c.gap}px${shadowVarStyle};">
@@ -1452,6 +1467,7 @@ class HkiNavigationCard extends LitElement {
     for (let j = 0; j < vButtons.length; j++) slots.push({ key: `v:${vButtons[j].id}`, btn: vButtons[j] });
 
     return html`
+      ${spacerHtml}
       ${placeholder}
       ${this._renderBottomBar()}
       <div class="fab-anchor" style="${anchorStyle} z-index:${c.z_index}; --hki-size:${c.button_size}px; --hki-gap:${c.gap}px${shadowVarStyle};">
@@ -1736,6 +1752,7 @@ class HkiNavigationCardEditor extends LitElement {
         <ha-alert alert-type="warning" class="doc"><div class="doc-title">Warning</div><div>This card uses fixed positions on your screen, to edit this card you will have to click on the placeholder card in the section where you have placed this card.<br><br>Please read the documentation at github.com/jimz011/hki-navigation-card to set up this card.<br><br>This card may contain bugs. Use at your own risk!</div></ha-alert>
         <div class="section"><div class="section-title">Layout</div>
           <div class="grid2">
+            <ha-formfield .label=${"Reserve bottom space"}><ha-switch .checked=${!!c.reserve_space} @change=${(e) => this._setBool("reserve_space", e.target.checked)}></ha-switch></ha-formfield>
             <ha-select .label=${"Position"} .value=${c.position} @selected=${(e) => this._setValue("position", e.target.value)} @closed=${(e) => e.stopPropagation()}><mwc-list-item value="bottom-left">Bottom left</mwc-list-item><mwc-list-item value="bottom-center">Bottom center</mwc-list-item><mwc-list-item value="bottom-right">Bottom right</mwc-list-item></ha-select>
             <ha-textfield type="number" .label=${"Offset X (px)"} .value=${String(c.offset_x)} @change=${(e) => this._setValue("offset_x", Number(e.target.value))}></ha-textfield>
             <ha-textfield type="number" .label=${"Offset Y (px)"} .value=${String(c.offset_y)} @change=${(e) => this._setValue("offset_y", Number(e.target.value))}></ha-textfield>
