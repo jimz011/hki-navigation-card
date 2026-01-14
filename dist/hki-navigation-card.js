@@ -21,7 +21,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.0.3"; // Bumped version
+const VERSION = "1.0.4"; // Bumped version for fix
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -618,6 +618,11 @@ class HkiNavigationCard extends LitElement {
     
     // Fix unresponsive buttons after nav
     this._onLocationChange = () => {
+        // Reset DOM references so we force finding the new view. 
+        // Failing to do this causes measurement on the OLD (now detached) view.
+        this._contentEl = null;
+        this._rightPanelEl = null;
+
         setTimeout(() => this._debouncedRefreshAndMeasure(), 50);
         setTimeout(() => this._debouncedRefreshAndMeasure(), 500);
     };
@@ -626,10 +631,20 @@ class HkiNavigationCard extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener("resize", this._onResize);
-    window.addEventListener("location-changed", this._onLocationChange); // Re-measure on nav
+    window.addEventListener("location-changed", this._onLocationChange);
+    
+    // Fix: Invalidate cached DOM references on reconnect to ensure we aren't holding onto stale views
+    this._contentEl = null;
+    this._rightPanelEl = null;
+    this._bottomBarBounds = null;
+
     this._refreshUiState(true);
-    // Force immediate measurement to prevent invisible buttons
+    // Force immediate measurement
     requestAnimationFrame(() => this._debouncedRefreshAndMeasure());
+    
+    // Safety measures for slow-loading views
+    setTimeout(() => this._debouncedRefreshAndMeasure(), 250);
+    setTimeout(() => this._debouncedRefreshAndMeasure(), 1000);
   }
 
   disconnectedCallback() {
@@ -1216,7 +1231,13 @@ class HkiNavigationCard extends LitElement {
   }
 
   _handleAction(btn, which) {
-    const hass = this.hass;
+    let hass = this.hass;
+    // Fallback: If hass is missing (sometimes happens during view transitions), try to grab it from the main element
+    if (!hass) {
+        const main = document.querySelector("home-assistant");
+        if (main && main.hass) hass = main.hass;
+    }
+    
     if (!hass) return;
     const action = (btn && btn[which]) || btn?.tap_action || { action: "none" };
     const type = action?.action || "none";
