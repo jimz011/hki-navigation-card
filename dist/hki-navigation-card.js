@@ -1860,17 +1860,15 @@ class HkiNavigationCardEditor extends LitElement {
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
-                <ha-yaml-editor
-                  .hass=${this.hass}
+                <ha-textarea
                   .label=${"Label (multi-line Jinja2 templates supported)"}
                   .value=${btn.label ?? ""}
-                  @value-changed=${(ev) => {
-                    ev.stopPropagation();
-                    const newValue = ev.detail?.value;
+                  rows="3"
+                  @input=${(ev) => {
+                    const newValue = ev.target.value;
                     if (newValue !== btn.label) {
-                      // Update button label directly, like header-card does
                       const updatedBtn = { ...btn };
-                      if (!newValue || newValue === "" || (typeof newValue === 'object' && Object.keys(newValue).length === 0)) {
+                      if (!newValue || newValue === "") {
                         delete updatedBtn.label;
                       } else {
                         updatedBtn.label = newValue;
@@ -1878,8 +1876,8 @@ class HkiNavigationCardEditor extends LitElement {
                       setBtnFn(updatedBtn);
                     }
                   }}
-                  @click=${(e) => e.stopPropagation()}
-                ></ha-yaml-editor>
+                ></ha-textarea>
+                <p style="font-size: 11px; opacity: 0.7; margin: 4px 0 0 0;">Supports Jinja2: <code>{{ "{{" }} states('sensor.temp') {{ "}}" }}</code>, <code>{{ "{{" }} user {{ "}}" }}</code>, if/else, filters, etc.</p>
       </div></details>
 
       <details><summary class="cat-head">Style Overrides</summary><div class="cat-content">
