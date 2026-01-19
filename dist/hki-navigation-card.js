@@ -1714,27 +1714,6 @@ class HkiNavigationCardEditor extends LitElement {
     if (customElements.get("ha-code-editor")) return html`<div class="code-wrap"><div class="code-label">${label}</div><ha-code-editor .hass=${this.hass} .mode=${"yaml"} .value=${value || ""} @value-changed=${(e) => { const v = e.detail?.value ?? ""; onChange(v); validate(v); }}></ha-code-editor>${showError ? html`<ha-alert alert-type="error">YAML error: ${this._yamlErrors[errorKey]}</ha-alert>` : html``}</div>`;
     return html`<ha-textarea .label=${label} .value=${value || ""} @change=${(e) => { const v = e.target.value; onChange(v); validate(v); }}></ha-textarea>${showError ? html`<ha-alert alert-type="error">YAML error: ${this._yamlErrors[errorKey]}</ha-alert>` : html``}`;
   }
-  _renderTemplateEditor(label, value, onChange) {
-    const currentValue = value ?? "";
-    return html`
-      <ha-yaml-editor
-        .hass=${this.hass}
-        .label=${label}
-        .value=${currentValue}
-        @value-changed=${(ev) => {
-          ev.stopPropagation();
-          const newValue = ev.detail?.value ?? "";
-          // Only trigger onChange if value actually changed
-          // Compare strings to handle yaml editor's value normalization
-          if (String(newValue) !== String(currentValue)) {
-            // Pass undefined if empty, otherwise pass the value
-            onChange(newValue === "" ? undefined : newValue);
-          }
-        }}
-        @click=${(e) => e.stopPropagation()}
-      ></ha-yaml-editor>
-    `;
-  }
   _renderActionEditor(btn, setBtnFn, which, title, errorKeyPrefix) {
     const act = btn?.[which] || { action: "none" };
     const type = act.action || "none";
@@ -1836,7 +1815,25 @@ class HkiNavigationCardEditor extends LitElement {
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
-        ${this._renderTemplateEditor("Label (Jinja2 templates supported)", btn.label, (v) => setBtnFn({ ...btn, label: v }))}
+        <ha-yaml-editor
+          .hass=${this.hass}
+          .label=${"Label (Jinja2 templates supported)"}
+          .value=${btn.label ?? ""}
+          @value-changed=${(ev) => {
+            ev.stopPropagation();
+            const newValue = ev.detail?.value;
+            console.log('[HKI Nav Debug] ha-yaml-editor value-changed:', {
+              type: typeof newValue,
+              value: newValue,
+              isObject: typeof newValue === 'object',
+              currentLabel: btn.label
+            });
+            if (newValue !== (btn.label ?? "")) {
+              setBtnFn({ ...btn, label: newValue || undefined });
+            }
+          }}
+          @click=${(e) => e.stopPropagation()}
+        ></ha-yaml-editor>
       </div></details>
 
       <details><summary class="cat-head">Style Overrides</summary><div class="cat-content">
