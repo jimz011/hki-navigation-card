@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.1.1"; // Added perform-action, jinja templating, collapsible sections
+const VERSION = "1.1.0"; // Added perform-action, jinja templating, collapsible sections
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -1773,7 +1773,51 @@ class HkiNavigationCardEditor extends LitElement {
   static get properties() {
     return { hass: {}, _config: { state: true }, _expanded: { state: true }, _yamlErrors: { state: true } };
   }
-  constructor() { super(); this._expanded = {}; this._yamlErrors = {}; }
+  constructor() { super(); this._expanded = {}; this._yamlErrors = {}; this._haUiLoaded = false; }
+
+  connectedCallback() {
+    super.connectedCallback();
+    // Ensure HA's built-in pickers/selectors are registered before we attempt to render them.
+    // Otherwise customElements.get(...) returns undefined and the selector element won't show.
+    this._ensureHaUi().catch(() => {});
+  }
+
+  async _ensureHaUi() {
+    if (this._haUiLoaded) return;
+    this._haUiLoaded = true;
+    const tryImport = async (path) => {
+      try {
+        await import(path);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+
+    // Try common HA build paths (varies by HA version / build).
+    const paths = [
+      // Core selector and common pickers
+      "/frontend_latest/src/components/ha-selector",
+      "/frontend_latest/src/components/ha-service-picker",
+      "/frontend_latest/src/components/ha-entity-picker",
+      // Legacy / fallback builds
+      "/frontend_es5/src/components/ha-selector",
+      "/frontend_es5/src/components/ha-service-picker",
+      "/frontend_es5/src/components/ha-entity-picker",
+      // Lovelace editor bits (for action editing)
+      "/frontend_latest/src/panels/lovelace/editor/hui-action-editor",
+      "/frontend_es5/src/panels/lovelace/editor/hui-action-editor",
+    ];
+
+    for (const p of paths) {
+      // Stop early if we already have the key elements.
+      if (customElements.get("ha-service-picker") && customElements.get("ha-selector")) break;
+      await tryImport(p);
+    }
+
+    // Re-render once components have had a chance to register.
+    this.requestUpdate();
+  }
   setConfig(config) { this._config = normalizeConfig(config); }
   get _c() { return this._config || normalizeConfig({}); }
   _cleanupConfig(config) {
@@ -1901,24 +1945,62 @@ class HkiNavigationCardEditor extends LitElement {
 
   _renderServicePicker(label, value, onChange) {
     const val = value || "";
-    // Prefer HA's service picker/selector if available
-    if (customElements.get("ha-service-picker")) {
-      return html`<ha-service-picker
-        .hass=${this.hass}
-        .label=${label}
-        .value=${val}
-        @value-changed=${(e) => onChange(e.detail?.value ?? e.target?.value ?? "")}
-      ></ha-service-picker>`;
+    // NOTE: HA's built-in "service" selector is not available/registered in all HA versions.
+    // To guarantee a working UI (and match Bubble Card's intent), we provide an explicit
+    // domain+service picker powered by hass.services.
+
+    const services = this.hass?.services;
+    const parts = safeString(val).split(".");
+    const currentDomain = parts.length === 2 ? parts[0] : "";
+    const currentService = parts.length === 2 ? parts[1] : "";
+
+    if (services && typeof services === "object") {
+      const domains = Object.keys(services).sort();
+      const domain = domains.includes(currentDomain) ? currentDomain : "";
+      const serviceNames = domain ? Object.keys(services[domain] || {}).sort() : [];
+      const service = serviceNames.includes(currentService) ? currentService : "";
+      const set = (d, s) => {
+        if (!d || !s) {
+          onChange("");
+          return;
+        }
+        onChange(`${d}.${s}`);
+      };
+      return html`
+        <div class="subheader" style="margin-top: 6px;">${label}</div>
+        <div class="grid2">
+          <ha-select
+            .label=${"Domain"}
+            .value=${domain}
+            @selected=${(e) => {
+              const d = e.target.value;
+              // reset service when changing domain
+              set(d, "");
+              // keep domain selection visible even before service selected
+              this.requestUpdate();
+            }}
+            @closed=${(e) => e.stopPropagation()}
+          >
+            <mwc-list-item value="" ?selected=${!domain}>(select)</mwc-list-item>
+            ${domains.map((d) => html`<mwc-list-item .value=${d}>${d}</mwc-list-item>`)}
+          </ha-select>
+
+          <ha-select
+            .label=${"Service"}
+            .value=${service}
+            ?disabled=${!domain}
+            @selected=${(e) => set(domain, e.target.value)}
+            @closed=${(e) => e.stopPropagation()}
+          >
+            <mwc-list-item value="" ?selected=${!service}>(select)</mwc-list-item>
+            ${serviceNames.map((s) => html`<mwc-list-item .value=${s}>${s}</mwc-list-item>`)}
+          </ha-select>
+        </div>
+        <div class="hint">Selected: <code>${domain && service ? `${domain}.${service}` : ""}</code></div>
+      `;
     }
-    if (customElements.get("ha-selector")) {
-      return html`<ha-selector
-        .hass=${this.hass}
-        .label=${label}
-        .selector=${{ service: {} }}
-        .value=${val}
-        @value-changed=${(e) => onChange(e.detail?.value ?? "")}
-      ></ha-selector>`;
-    }
+
+    // Fallback (no hass.services yet)
     return html`<ha-textfield
       .label=${label}
       .value=${val}
@@ -1963,7 +2045,6 @@ class HkiNavigationCardEditor extends LitElement {
             .selector=${{ target: {} }}
             .label=${"Target (optional)"}
             .value=${act.target || null}
-            ?disabled=${!act.perform_action}
             @value-changed=${(ev) => {
               ev.stopPropagation();
               const target = ev.detail?.value;
@@ -1984,7 +2065,6 @@ class HkiNavigationCardEditor extends LitElement {
             .hass=${this.hass}
             .label=${"Service Data (optional, YAML)"}
             .value=${act.data || null}
-            ?disabled=${!act.perform_action}
             @value-changed=${(ev) => {
               ev.stopPropagation();
               const data = ev.detail?.value;
