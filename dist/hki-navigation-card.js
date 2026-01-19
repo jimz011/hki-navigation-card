@@ -1975,7 +1975,14 @@ class HkiNavigationCardEditor extends LitElement {
                       if (newValue !== (btn.label ?? "")) {
                         const updatedBtn = { ...btn };
                         const v = newValue;
-                        if (!v.trim()) delete updatedBtn.label;
+                        // IMPORTANT: don't delete the property here.
+                        // The editor's setBtnFn ultimately calls _setButtonById(),
+                        // which merges patches into the existing button object.
+                        // If we delete the property, the merge keeps the old label.
+                        // Setting it to an empty string overwrites the old value,
+                        // and _cleanupConfig() will remove the empty string before
+                        // emitting the final config.
+                        if (!v.trim()) updatedBtn.label = "";
                         else updatedBtn.label = v;
                         setBtnFn(updatedBtn);
                       }
@@ -1990,7 +1997,7 @@ class HkiNavigationCardEditor extends LitElement {
                       const newValue = ev.target.value;
                       if (newValue !== (btn.label ?? "")) {
                         const updatedBtn = { ...btn };
-                        if (!newValue || newValue === "") delete updatedBtn.label;
+                        if (!newValue || newValue.trim() === "") updatedBtn.label = "";
                         else updatedBtn.label = newValue;
                         setBtnFn(updatedBtn);
                       }
