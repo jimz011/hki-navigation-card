@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.1.0";
+const VERSION = "1.1.0"; // Added perform-action, jinja templating, collapsible sections
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -881,10 +881,31 @@ class HkiNavigationCard extends LitElement {
     return inferButtonTypeFromLegacy(btn, c.default_button_type);
   }
 
-  _parseTemplate(text) {
+  async _parseTemplate(text) {
       if (!text || typeof text !== 'string') return "";
+      
+      // Check if it contains template syntax
+      const hasTemplate = text.includes("{{") || text.includes("{%") || text.includes("{#");
+      
+      if (!hasTemplate) return text;
+      
+      // Try full jinja2 rendering via Home Assistant
+      if (this.hass?.callWS) {
+        try {
+          const result = await this.hass.callWS({
+            type: "render_template",
+            template: text,
+            variables: { user: this.hass?.user?.name || "User", version: VERSION },
+            strict: false,
+          });
+          return result?.result != null ? String(result.result) : text;
+        } catch (err) {
+          console.warn("[HKI Navigation Card] Template render failed, using fallback:", err);
+        }
+      }
+      
+      // Fallback to simple replacement for {{ user }} and {{ version }}
       let out = text;
-      // Lightweight template parsing
       if (out.includes("{{ user }}")) {
           const name = this.hass?.user?.name || "User";
           out = out.replace(/\{\{\s*user\s*\}\}/g, name);
@@ -897,7 +918,17 @@ class HkiNavigationCard extends LitElement {
 
   _getLabelText(btn) {
     const raw = btn?.label || btn?.tooltip || "";
-    return this._parseTemplate(raw);
+    // Handle async template rendering
+    if (!btn._labelCache || btn._labelCache.raw !== raw) {
+      btn._labelCache = { raw: raw, rendered: raw };
+      this._parseTemplate(raw).then(rendered => {
+        if (btn._labelCache.raw === raw) {
+          btn._labelCache.rendered = rendered;
+          this.requestUpdate();
+        }
+      });
+    }
+    return btn._labelCache.rendered || raw;
   }
 
   _getPillWidth(btn) {
@@ -1290,6 +1321,7 @@ class HkiNavigationCard extends LitElement {
       return;
     }
     if (type === "call-service") {
+      // Legacy support for old call-service action
       const svc = action.service;
       if (!svc || !svc.includes(".")) return;
       const [domain, service] = svc.split(".", 2);
@@ -1640,6 +1672,23 @@ class HkiNavigationCardEditor extends LitElement {
     if (customElements.get("ha-code-editor")) return html`<div class="code-wrap"><div class="code-label">${label}</div><ha-code-editor .hass=${this.hass} .mode=${"yaml"} .value=${value || ""} @value-changed=${(e) => { const v = e.detail?.value ?? ""; onChange(v); validate(v); }}></ha-code-editor>${showError ? html`<ha-alert alert-type="error">YAML error: ${this._yamlErrors[errorKey]}</ha-alert>` : html``}</div>`;
     return html`<ha-textarea .label=${label} .value=${value || ""} @change=${(e) => { const v = e.target.value; onChange(v); validate(v); }}></ha-textarea>${showError ? html`<ha-alert alert-type="error">YAML error: ${this._yamlErrors[errorKey]}</ha-alert>` : html``}`;
   }
+  _renderTemplateEditor(label, value, onChange) {
+    return html`
+      <ha-yaml-editor
+        .hass=${this.hass}
+        .label=${label}
+        .value=${value || ""}
+        @value-changed=${(ev) => {
+          ev.stopPropagation();
+          const newValue = ev.detail?.value;
+          if (newValue !== value) {
+            onChange(newValue || undefined);
+          }
+        }}
+        @click=${(e) => e.stopPropagation()}
+      ></ha-yaml-editor>
+    `;
+  }
   _renderActionEditor(btn, setBtnFn, which, title, errorKeyPrefix) {
     const act = btn?.[which] || { action: "none" };
     const type = act.action || "none";
@@ -1679,6 +1728,7 @@ class HkiNavigationCardEditor extends LitElement {
               }}
               @click=${(e) => e.stopPropagation()}
             ></ha-selector>
+            
             <ha-yaml-editor
               .hass=${this.hass}
               .label=${"Service Data (optional, YAML)"}
@@ -1700,7 +1750,6 @@ class HkiNavigationCardEditor extends LitElement {
             ></ha-yaml-editor>
           ` : ''}
         ` : html``}
-        ${type === "call-service" ? html`<ha-textfield .label=${"Service (domain.service)"} .value=${act.service || ""} placeholder="light.turn_on" @change=${(e) => update({ service: e.target.value })}></ha-textfield>${this._renderEntityPicker("Target entity (optional)", act.target_entity || "", (ent) => { update({ target_entity: ent }); })}${this._renderCodeEditor("Service data (YAML)", act.service_data || "", (v) => { update({ service_data: v); }, errorKey)}` : html``}
         ${type === "toggle" || type === "more-info" ? html`<div class="hint">Uses the button’s <b>Entity</b> field (set above in Interaction & Data).</div>` : html``}
         ${type === "back" ? html`<div class="hint">Back uses browser history. (Tap action forces icon to mdi:chevron-left.)</div>` : html``}
       </div>`;
@@ -1735,11 +1784,11 @@ class HkiNavigationCardEditor extends LitElement {
     const pillTypeSelected = effectiveType === "pill" || effectiveType === "pill_label";
     return html`
     <div class="category-wrapper">
-      <details open><summary class="cat-head">Visual Customization</summary><div class="cat-content">
+      <details><summary class="cat-head">Visual Customization</summary><div class="cat-content">
         ${hasIconPicker ? html`<ha-icon-picker .label=${"Icon"} .value=${btn.icon || ""} @value-changed=${(e) => setBtnFn({ ...btn, icon: e.detail.value })}></ha-icon-picker>` : html`<ha-textfield .label=${"Icon (mdi:...)"} .value=${btn.icon || ""} placeholder="mdi:home" @change=${(e) => setBtnFn({ ...btn, icon: e.target.value })}></ha-textfield>`}
         <div class="grid2">
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
-            <ha-textfield .label=${"Label (supports {{ user }})"} .value=${btn.label || ""} @change=${(e) => setBtnFn({ ...btn, label: e.target.value })}></ha-textfield>
+            ${this._renderTemplateEditor("Label (Jinja2 templates supported)", btn.label, (v) => setBtnFn({ ...btn, label: v }))}
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
       </div></details>
@@ -1761,7 +1810,7 @@ class HkiNavigationCardEditor extends LitElement {
         </div></div>
       </div></details>
       
-      <details open><summary class="cat-head">Interaction & Data</summary><div class="cat-content">
+      <details><summary class="cat-head">Interaction & Data</summary><div class="cat-content">
         ${this._renderEntityPicker("Entity (used for Toggle, More-info & State)", btn.entity || "", (v) => setBtnFn({ ...btn, entity: v }))}
         ${this._renderActionEditor(btn, setBtnFn, "tap_action", "Tap Action", errorKeyPrefix)}
         ${this._renderActionEditor(btn, setBtnFn, "hold_action", "Hold / Right click", errorKeyPrefix)}
@@ -1822,8 +1871,19 @@ class HkiNavigationCardEditor extends LitElement {
     const showPillWidthGlobal = c.default_button_type === "pill" || c.default_button_type === "pill_label";
     return html`
       <div class="editor">
-        <ha-alert alert-type="warning" class="doc"><div class="doc-title">Warning</div><div>This card uses fixed positions on your screen, to edit this card you will have to click on the placeholder card in the section where you have placed this card.<br><br>Please read the documentation at github.com/jimz011/hki-navigation-card to set up this card.<br><br>This card may contain bugs. Use at your own risk!</div></ha-alert>
-        <div class="section"><div class="section-title">Layout</div>
+        <details class="box-section" open>
+          <summary>Info</summary>
+          <div class="box-content">
+            <ha-alert alert-type="warning">
+              <div class="doc-title">Warning</div>
+              <div>This card uses fixed positions on your screen, to edit this card you will have to click on the placeholder card in the section where you have placed this card.<br><br>Please read the documentation at github.com/jimz011/hki-navigation-card to set up this card.<br><br>This card may contain bugs. Use at your own risk!</div>
+            </ha-alert>
+          </div>
+        </details>
+
+        <details class="box-section">
+          <summary>Position & Appearance</summary>
+          <div class="box-content">
           <div class="grid2">
             <ha-formfield .label=${"Reserve bottom space"}><ha-switch .checked=${!!c.reserve_space} @change=${(e) => this._setBool("reserve_space", e.target.checked)}></ha-switch></ha-formfield>
             <ha-select .label=${"Position"} .value=${c.position} @selected=${(e) => this._setValue("position", e.target.value)} @closed=${(e) => e.stopPropagation()}><mwc-list-item value="bottom-left">Bottom left</mwc-list-item><mwc-list-item value="bottom-center">Bottom center</mwc-list-item><mwc-list-item value="bottom-right">Bottom right</mwc-list-item></ha-select>
@@ -1838,7 +1898,6 @@ class HkiNavigationCardEditor extends LitElement {
             <ha-textfield type="number" .label=${"Z-index"} .value=${String(c.z_index)} @change=${(e) => this._setValue("z_index", Number(e.target.value))}></ha-textfield>
           </div>
           ${showCenterOptions ? html`<div class="subsection"><div class="subheader">Center options</div><div class="grid2"><ha-formfield .label=${"Spread buttons across width"}><ha-switch .checked=${!!c.center_spread} @change=${(e) => this._setValue("center_spread", e.target.checked)}></ha-switch></ha-formfield><div class="hint">When enabled, the base + horizontal buttons spread across the full width.</div></div></div>` : html``}
-          <div class="subsection"><div class="subheader">Bottom bar (cosmetic)<span style="margin-left: 8px; padding: 2px 8px; background: rgba(255, 165, 0, 0.2); color: orange; border-radius: 4px; font-size: 11px; font-weight: 600; vertical-align: middle;">⚠️ EXPERIMENTAL</span></div><div class="grid2"><ha-formfield .label=${"Enable bottom bar"}><ha-switch .checked=${!!c.bottom_bar_enabled} @change=${(e) => this._setBool("bottom_bar_enabled", e.target.checked)}></ha-switch></ha-formfield>
               ${c.bottom_bar_enabled ? html`${c.position === "bottom-center" ? html`<ha-formfield .label=${"Span full width"}><ha-switch .checked=${!!c.bottom_bar_full_width} @change=${(e) => this._setBool("bottom_bar_full_width", e.target.checked)}></ha-switch></ha-formfield>` : html`<div class="hint" style="padding: 8px; background: rgba(255, 165, 0, 0.1); border-radius: 8px;">ℹ️ Non-full-width bar only available with center alignment. Bar will span full width.</div>`}
                 <ha-textfield type="number" .label=${"Bottom bar height (px)"} .value=${String(c.bottom_bar_height)} @change=${(e) => this._setValue("bottom_bar_height", Number(e.target.value))}></ha-textfield><ha-textfield type="number" .label=${"Bottom bar bottom offset (px)"} .value=${String(c.bottom_bar_bottom_offset)} @change=${(e) => this._setValue("bottom_bar_bottom_offset", Number(e.target.value))}></ha-textfield><ha-textfield type="number" .label=${"Bottom bar border radius (px)"} .value=${String(c.bottom_bar_border_radius)} @change=${(e) => this._setValue("bottom_bar_border_radius", Number(e.target.value))}></ha-textfield><ha-textfield .label=${"Bottom bar box-shadow (CSS)"} .value=${c.bottom_bar_box_shadow || ""} @change=${(e) => this._setValue("bottom_bar_box_shadow", e.target.value)}></ha-textfield><ha-textfield .label=${"Bottom bar color (CSS)"} .value=${c.bottom_bar_color || ""} @change=${(e) => this._setValue("bottom_bar_color", e.target.value)}></ha-textfield><ha-textfield type="number" step="0.01" min="0" max="1" .label=${"Bottom bar opacity (0..1)"} .value=${String(c.bottom_bar_opacity ?? 1)} @change=${(e) => this._setValue("bottom_bar_opacity", Number(e.target.value))}></ha-textfield><ha-textfield type="number" .label=${"Inset left (px)"} .value=${String(c.bottom_bar_margin_left ?? 0)} @change=${(e) => this._setValue("bottom_bar_margin_left", Number(e.target.value))}></ha-textfield><ha-textfield type="number" .label=${"Inset right (px)"} .value=${String(c.bottom_bar_margin_right ?? 0)} @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}></ha-textfield>
                 ${!c.bottom_bar_full_width ? html`<ha-textfield type="number" .label=${"Border width (px)"} .value=${String(c.bottom_bar_border_width ?? 0)} @change=${(e) => this._setValue("bottom_bar_border_width", Number(e.target.value))}></ha-textfield>` : ''}${!c.bottom_bar_full_width ? html`<ha-textfield .label=${"Border style"} .value=${c.bottom_bar_border_style || "solid"} placeholder="solid, dashed, dotted, etc." @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}></ha-textfield>` : ''}${!c.bottom_bar_full_width ? html`<ha-textfield .label=${"Border color (CSS)"} .value=${c.bottom_bar_border_color || ""} placeholder="(optional)" @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}></ha-textfield>` : ''}
@@ -1877,6 +1936,7 @@ class HkiNavigationCardEditor extends LitElement {
       .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       .empty { opacity: 0.7; padding: 8px 2px; }
+      ha-textfield, ha-select, ha-entity-picker, ha-selector, ha-yaml-editor { width: 100%; }
       ha-expansion-panel { border-radius: 14px; overflow: hidden; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
       .btn-header { display: flex; align-items: center; gap: 10px; padding-right: 8px; }
       .btn-header-text { flex: 1; min-width: 0; }
@@ -1894,7 +1954,42 @@ class HkiNavigationCardEditor extends LitElement {
       .code-label { font-weight: 700; opacity: 0.85; }
       ha-code-editor { border-radius: 12px; overflow: hidden; }
       
-      /* New Category Styles */
+      /* Collapsible Section Styles - Matching Header Card */
+      details.box-section {
+        background: var(--secondary-background-color);
+        border-radius: 4px;
+        margin-bottom: 8px;
+        overflow: hidden;
+        border: 1px solid var(--divider-color);
+      }
+      details.box-section > summary {
+        padding: 12px;
+        cursor: pointer;
+        font-weight: 600;
+        background: var(--primary-background-color);
+        border-bottom: 1px solid var(--divider-color);
+        list-style: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      details.box-section > summary::-webkit-details-marker { display: none; }
+      details.box-section > summary::after {
+        content: '+'; 
+        font-weight: bold;
+        font-size: 1.2em;
+      }
+      details.box-section[open] > summary::after {
+        content: '-';
+      }
+      .box-content {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      
+      /* Keep existing category styles for nested details */
       details { margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(128, 128, 128, 0.15); overflow: hidden; }
       details > summary { list-style: none; padding: 10px 12px; font-weight: 700; cursor: pointer; user-select: none; background: rgba(0,0,0,0.02); display: flex; align-items: center; outline: none; }
       details > summary::-webkit-details-marker { display: none; }
