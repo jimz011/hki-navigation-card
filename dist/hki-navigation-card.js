@@ -1815,30 +1815,19 @@ class HkiNavigationCardEditor extends LitElement {
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
-        <ha-yaml-editor
-          .hass=${this.hass}
-          .label=${"Label"}
-          .value=${btn.label || ""}
-          @value-changed=${(ev) => {
-            ev.stopPropagation();
-            const value = ev.detail?.value;
-            console.log('[NAV CARD DEBUG] ha-yaml-editor event:', {
-              rawValue: value,
-              type: typeof value,
-              isString: typeof value === 'string',
-              isObject: typeof value === 'object',
-              stringified: JSON.stringify(value),
-              currentBtnLabel: btn.label
-            });
-            if (value !== btn.label) {
-              const updateObj = { ...btn, label: value || undefined };
-              console.log('[NAV CARD DEBUG] Calling setBtnFn with:', updateObj);
-              setBtnFn(updateObj);
-            }
-          }}
-          @click=${(e) => e.stopPropagation()}
-        ></ha-yaml-editor>
-        <p style="font-size: 11px; opacity: 0.7; margin: 4px 0 0 0;">Supports Jinja templates: <code>{{ "{{" }} states('sensor.temp') {{ "}}" }}</code>, <code>{{ "{{" }} user {{ "}}" }}</code></p>
+                <ha-yaml-editor
+                  .hass=${this.hass}
+                  .label=${"Label (Subtitle)"}
+                  .value=${btn.label || ""}
+                  @value-changed=${(ev) => {
+                    ev.stopPropagation();
+                    const value = ev.detail?.value;
+                    if (value !== btn.label) {
+                      setBtnFn({ ...btn, label: value || undefined });
+                    }
+                  }}
+                  @click=${(e) => e.stopPropagation()}
+                ></ha-yaml-editor>
       </div></details>
 
       <details><summary class="cat-head">Style Overrides</summary><div class="cat-content">
