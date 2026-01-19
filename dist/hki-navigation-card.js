@@ -2036,20 +2036,47 @@ class HkiNavigationCardEditor extends LitElement {
       </div></details>` : html``}
     </div>`;
   }
-  _renderBaseButtonPanel() {
+  _renderBaseButtonPanel(asBoxContent = false) {
     const c = this._c;
     const btn = c.base.button || DEFAULT_BUTTON();
     const key = `base:${btn.id}`;
     const expanded = !!this._expanded[key];
-    const setBtn = (nextBtn) => { const cfg = deepClone(this._c); cfg.base.button = { ...btn, ...nextBtn }; this._emit(cfg); };
+    const setBtn = (nextBtn) => {
+      const cfg = deepClone(this._c);
+      cfg.base.button = { ...btn, ...nextBtn };
+      this._emit(cfg);
+    };
+
+    const content = html`
+      <ha-expansion-panel
+        .expanded=${expanded}
+        @expanded-changed=${(e) => {
+          const next = e.detail?.value ?? e.detail?.expanded ?? e.target?.expanded ?? false;
+          this._expanded[key] = !!next;
+          this.requestUpdate();
+        }}
+      >
+        <div slot="header" class="btn-header">
+          <ha-icon .icon=${btn.icon || "mdi:home"}></ha-icon>
+          <div class="btn-header-text">
+            <div class="btn-title">${btn.label || btn.tooltip || "Base button"}</div>
+            <div class="btn-sub">${btn.icon || ""}${btn.entity ? ` • ${btn.entity}` : ""}</div>
+          </div>
+        </div>
+        <div class="panel">${this._renderButtonPanel(btn, setBtn, "base", false)}</div>
+      </ha-expansion-panel>
+    `;
+
+    if (asBoxContent) return content;
+
     return html`
-      <div class="section"><div class="section-title">Base button</div>
-        <ha-expansion-panel .expanded=${expanded} @expanded-changed=${(e) => { const next = e.detail?.value ?? e.detail?.expanded ?? e.target?.expanded ?? false; this._expanded[key] = !!next; this.requestUpdate(); }}>
-          <div slot="header" class="btn-header"><ha-icon .icon=${btn.icon || "mdi:home"}></ha-icon><div class="btn-header-text"><div class="btn-title">${btn.label || btn.tooltip || "Base button"}</div><div class="btn-sub">${btn.icon || ""}${btn.entity ? ` • ${btn.entity}` : ""}</div></div></div>
-          <div class="panel">${this._renderButtonPanel(btn, setBtn, "base", false)}</div>
-        </ha-expansion-panel></div>`;
+      <div class="section">
+        <div class="section-title">Base button</div>
+        ${content}
+      </div>
+    `;
   }
-  _renderGroup(group) {
+  _renderGroup(  _renderGroup(group, asBoxContent = false) {
     const c = this._c;
     const gKey = group === "vertical" ? "vertical" : "horizontal";
     const enabled = !!c[gKey].enabled;
@@ -2057,8 +2084,11 @@ class HkiNavigationCardEditor extends LitElement {
     const centerHidden = c.position === "bottom-center" && group === "vertical";
     const tip = html`<ha-alert alert-type="info">Tip: If you disable this group, you can still configure its buttons and open it temporarily using the <b>Show/Hide Group</b> action. It auto-closes after a button is pressed.</ha-alert>`;
     const centerWarn = centerHidden ? html`<ha-alert alert-type="warning">Vertical group is <b>always hidden</b> when Position is <b>Bottom center</b>. You can still configure it, but it won’t be displayed.</ha-alert>` : html``;
-    return html`
-      <div class="section"><div class="section-title row"><span>${group === "vertical" ? "Vertical group" : "Horizontal group"}</span><mwc-button @click=${() => this._addButton(group)} outlined><ha-icon icon="mdi:plus"></ha-icon>&nbsp;Add button</mwc-button></div>
+    const content = html`
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <div class="section-title" style="padding: 0; background: none; box-shadow: none;">${group === "vertical" ? "Vertical group" : "Horizontal group"}</div>
+        <mwc-button @click=${() => this._addButton(group)} outlined><ha-icon icon="mdi:plus"></ha-icon>&nbsp;Add button</mwc-button>
+      </div>
         ${tip}${centerWarn}
         <div class="grid2"><ha-formfield .label=${"Enabled"}><ha-switch .checked=${!!enabled} @change=${(e) => this._setBool(`${gKey}.enabled`, e.target.checked)}></ha-switch></ha-formfield>
           ${group === "horizontal" ? html`<ha-textfield type="number" .label=${"Columns"} .value=${String(c.horizontal.columns)} @change=${(e) => { const cfg = deepClone(this._c); cfg.horizontal.columns = Math.max(1, Number(e.target.value)); this._emit(cfg); }}></ha-textfield>` : html`<ha-textfield type="number" .label=${"Rows"} .value=${String(c.vertical.rows)} @change=${(e) => { const cfg = deepClone(this._c); cfg.vertical.rows = Math.max(1, Number(e.target.value)); this._emit(cfg); }}></ha-textfield>`}
@@ -2076,7 +2106,13 @@ class HkiNavigationCardEditor extends LitElement {
               <div class="panel">${this._renderButtonPanel(btn, setBtn, key, true)}</div>
             </ha-expansion-panel>`;
         })}
-      </div>`;
+      `;
+
+    if (asBoxContent) return content;
+
+    return html`
+      <div class="section">${content}</div>
+    `;
   }
   render() {
     if (!this.hass || !this._config) return html``;
@@ -2116,21 +2152,71 @@ class HkiNavigationCardEditor extends LitElement {
                 <ha-textfield type="number" .label=${"Bottom bar height (px)"} .value=${String(c.bottom_bar_height)} @change=${(e) => this._setValue("bottom_bar_height", Number(e.target.value))}></ha-textfield><ha-textfield type="number" .label=${"Bottom bar bottom offset (px)"} .value=${String(c.bottom_bar_bottom_offset)} @change=${(e) => this._setValue("bottom_bar_bottom_offset", Number(e.target.value))}></ha-textfield><ha-textfield type="number" .label=${"Bottom bar border radius (px)"} .value=${String(c.bottom_bar_border_radius)} @change=${(e) => this._setValue("bottom_bar_border_radius", Number(e.target.value))}></ha-textfield><ha-textfield .label=${"Bottom bar box-shadow (CSS)"} .value=${c.bottom_bar_box_shadow || ""} @change=${(e) => this._setValue("bottom_bar_box_shadow", e.target.value)}></ha-textfield><ha-textfield .label=${"Bottom bar color (CSS)"} .value=${c.bottom_bar_color || ""} @change=${(e) => this._setValue("bottom_bar_color", e.target.value)}></ha-textfield><ha-textfield type="number" step="0.01" min="0" max="1" .label=${"Bottom bar opacity (0..1)"} .value=${String(c.bottom_bar_opacity ?? 1)} @change=${(e) => this._setValue("bottom_bar_opacity", Number(e.target.value))}></ha-textfield><ha-textfield type="number" .label=${"Inset left (px)"} .value=${String(c.bottom_bar_margin_left ?? 0)} @change=${(e) => this._setValue("bottom_bar_margin_left", Number(e.target.value))}></ha-textfield><ha-textfield type="number" .label=${"Inset right (px)"} .value=${String(c.bottom_bar_margin_right ?? 0)} @change=${(e) => this._setValue("bottom_bar_margin_right", Number(e.target.value))}></ha-textfield>
                 ${!c.bottom_bar_full_width ? html`<ha-textfield type="number" .label=${"Border width (px)"} .value=${String(c.bottom_bar_border_width ?? 0)} @change=${(e) => this._setValue("bottom_bar_border_width", Number(e.target.value))}></ha-textfield>` : ''}${!c.bottom_bar_full_width ? html`<ha-textfield .label=${"Border style"} .value=${c.bottom_bar_border_style || "solid"} placeholder="solid, dashed, dotted, etc." @change=${(e) => this._setValue("bottom_bar_border_style", e.target.value)}></ha-textfield>` : ''}${!c.bottom_bar_full_width ? html`<ha-textfield .label=${"Border color (CSS)"} .value=${c.bottom_bar_border_color || ""} placeholder="(optional)" @change=${(e) => this._setValue("bottom_bar_border_color", e.target.value)}></ha-textfield>` : ''}
                 <div class="hint">Purely visual. The bar wraps buttons (center alignment only) or spans full width (left/right). Positive inset values extend the bar beyond buttons when wrapping, or shrink it when full-width is enabled. Negative values do the opposite. Does not affect click behavior.</div>` : ''}</div></div>
-          <div class="subsection"><div class="hint" style="padding: 8px; background: rgba(255, 165, 0, 0.1); border-radius: 8px; border-left: 3px solid orange;">⚠️ Note: Global settings will only apply to buttons that have their values set to "inherit" (blank fields in button configuration).</div><div class="subheader">Defaults</div><div class="grid2">
-              <ha-select .label=${"Default Button Type"} .value=${c.default_button_type} @selected=${(e) => this._setValue("default_button_type", e.target.value)} @closed=${(e) => e.stopPropagation()}>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
-              ${showPillWidthGlobal ? html`<ha-textfield type="number" .label=${`Global pill width (px) — 0 = auto (min ${MIN_PILL_WIDTH})`} .value=${String(c.pill_width || 0)} @change=${(e) => this._setGlobalPillWidth(Number(e.target.value))}></ha-textfield>` : html`<div class="hint">Global pill width appears when Default Button Type is a pill type.</div>`}
-              <ha-textfield .label=${"Default background (optional override)"} .value=${c.default_background || ""} placeholder="(blank = theme accent/primary)" @change=${(e) => this._setDefaultBackground(e.target.value)}></ha-textfield><ha-textfield type="number" step="0.01" min="0" max="1" .label=${"Default button background opacity (0..1)"} .value=${String(c.default_button_opacity ?? 1)} @change=${(e) => this._setDefaultButtonOpacity(e.target.value)}></ha-textfield><ha-textfield .label=${"Default icon color (optional override)"} .value=${c.default_icon_color || ""} placeholder="(blank = theme text color)" @change=${(e) => this._setDefaultIconColor(e.target.value)}></ha-textfield>
-            </div></div>
-          <div class="subsection"><div class="subheader">Global label style</div><div class="grid2">
-              <ha-textfield type="number" .label=${"Font size (px)"} .value=${String(c.label_style?.font_size ?? DEFAULT_LABEL_STYLE.font_size)} @change=${(e) => this._setLabelStyleGlobal("font_size", Number(e.target.value))}></ha-textfield>
-              <ha-select .label=${"Font weight"} .value=${String(c.label_style?.font_weight ?? DEFAULT_LABEL_STYLE.font_weight)} @selected=${(e) => this._setLabelStyleGlobal("font_weight", Number(e.target.value))} @closed=${(e) => e.stopPropagation()}>${FONT_WEIGHTS.map((fw) => html`<mwc-list-item .value=${String(fw.value)}>${fw.label}</mwc-list-item>`)}</ha-select>
-              <ha-textfield type="number" .label=${"Letter spacing (px)"} .value=${String(c.label_style?.letter_spacing ?? DEFAULT_LABEL_STYLE.letter_spacing)} @change=${(e) => this._setLabelStyleGlobal("letter_spacing", Number(e.target.value))}></ha-textfield>
-              <ha-select .label=${"Text transform"} .value=${c.label_style?.text_transform ?? "none"} @selected=${(e) => this._setLabelStyleGlobal("text_transform", e.target.value)} @closed=${(e) => e.stopPropagation()}><mwc-list-item value="none">None</mwc-list-item><mwc-list-item value="uppercase">Uppercase</mwc-list-item><mwc-list-item value="lowercase">Lowercase</mwc-list-item><mwc-list-item value="capitalize">Capitalize</mwc-list-item></ha-select>
-              <ha-textfield .label=${"Text color (optional)"} .value=${c.label_style?.color ?? ""} placeholder="(blank = theme/currentColor)" @change=${(e) => this._setLabelStyleGlobal("color", e.target.value)}></ha-textfield><ha-textfield .label=${"Label background (optional)"} .value=${c.label_style?.background ?? ""} placeholder="(blank = theme card rgba)" @change=${(e) => this._setLabelStyleGlobal("background", e.target.value)}></ha-textfield><ha-textfield type="number" .label=${"Label background opacity"} .value=${String(c.label_style?.background_opacity ?? DEFAULT_LABEL_STYLE.background_opacity)} @change=${(e) => this._setLabelStyleGlobal("background_opacity", Number(e.target.value))}></ha-textfield>
-            </div></div></div>
-        ${this._renderBaseButtonPanel()}
-        ${this._renderGroup("horizontal")}
-        ${this._renderGroup("vertical")}
+          
+        <details class="box-section" open>
+          <summary>Defaults</summary>
+          <div class="box-content">
+            <ha-alert alert-type="info">
+              <div><b>Defaults</b> apply to buttons that have values set to <b>inherit</b> (blank fields in the button config). This includes global label styling.</div>
+            </ha-alert>
+
+            <details open>
+              <summary>Button styling defaults</summary>
+              <div class="cat-content">
+                <div class="grid2">
+                  <ha-select .label=${"Default Button Type"} .value=${c.default_button_type} @selected=${(e) => this._setValue("default_button_type", e.target.value)} @closed=${(e) => e.stopPropagation()}>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
+                  ${showPillWidthGlobal ? html`<ha-textfield type="number" .label=${`Global pill width (px) — 0 = auto (min ${MIN_PILL_WIDTH})`} .value=${String(c.pill_width || 0)} @change=${(e) => this._setGlobalPillWidth(Number(e.target.value))}></ha-textfield>` : html`<div class="hint">Global pill width appears when Default Button Type is a pill type.</div>`}
+                  <ha-textfield .label=${"Default background (optional override)"} .value=${c.default_background || ""} placeholder="(blank = theme accent/primary)" @change=${(e) => this._setDefaultBackground(e.target.value)}></ha-textfield>
+                  <ha-textfield type="number" step="0.01" min="0" max="1" .label=${"Default button background opacity (0..1)"} .value=${String(c.default_button_opacity ?? 1)} @change=${(e) => this._setDefaultButtonOpacity(e.target.value)}></ha-textfield>
+                  <ha-textfield .label=${"Default icon color (optional override)"} .value=${c.default_icon_color || ""} placeholder="(blank = theme text color)" @change=${(e) => this._setDefaultIconColor(e.target.value)}></ha-textfield>
+                </div>
+              </div>
+            </details>
+
+            <details>
+              <summary>Label styling defaults</summary>
+              <div class="cat-content">
+                <div class="hint">These defaults are used when a button label style is left blank (inherit).</div>
+                <div class="grid2">
+                  <ha-textfield type="number" .label=${"Font size (px)"} .value=${String(c.label_style?.font_size ?? DEFAULT_LABEL_STYLE.font_size)} @change=${(e) => this._setLabelStyleGlobal("font_size", Number(e.target.value))}></ha-textfield>
+                  <ha-select .label=${"Font weight"} .value=${String(c.label_style?.font_weight ?? DEFAULT_LABEL_STYLE.font_weight)} @selected=${(e) => this._setLabelStyleGlobal("font_weight", Number(e.target.value))} @closed=${(e) => e.stopPropagation()}>${FONT_WEIGHTS.map((fw) => html`<mwc-list-item .value=${String(fw.value)}>${fw.label}</mwc-list-item>`)}</ha-select>
+                  <ha-textfield type="number" .label=${"Letter spacing (px)"} .value=${String(c.label_style?.letter_spacing ?? DEFAULT_LABEL_STYLE.letter_spacing)} @change=${(e) => this._setLabelStyleGlobal("letter_spacing", Number(e.target.value))}></ha-textfield>
+                  <ha-select .label=${"Text transform"} .value=${c.label_style?.text_transform ?? "none"} @selected=${(e) => this._setLabelStyleGlobal("text_transform", e.target.value)} @closed=${(e) => e.stopPropagation()}><mwc-list-item value="none">None</mwc-list-item><mwc-list-item value="uppercase">Uppercase</mwc-list-item><mwc-list-item value="lowercase">Lowercase</mwc-list-item><mwc-list-item value="capitalize">Capitalize</mwc-list-item></ha-select>
+                  <ha-textfield .label=${"Text color (optional)"} .value=${c.label_style?.color ?? ""} placeholder="(blank = theme/currentColor)" @change=${(e) => this._setLabelStyleGlobal("color", e.target.value)}></ha-textfield>
+                  <ha-textfield .label=${"Label background (optional)"} .value=${c.label_style?.background ?? ""} placeholder="(blank = theme card rgba)" @change=${(e) => this._setLabelStyleGlobal("background", e.target.value)}></ha-textfield>
+                  <ha-textfield type="number" .label=${"Label background opacity"} .value=${String(c.label_style?.background_opacity ?? DEFAULT_LABEL_STYLE.background_opacity)} @change=${(e) => this._setLabelStyleGlobal("background_opacity", Number(e.target.value))}></ha-textfield>
+                </div>
+              </div>
+            </details>
+          </div>
+        </details>
+
+        <details class="box-section" open>
+          <summary>Buttons</summary>
+          <div class="box-content">
+            <details open>
+              <summary>Base button</summary>
+              <div class="cat-content">
+                ${this._renderBaseButtonPanel(true)}
+              </div>
+            </details>
+
+            <details>
+              <summary>Horizontal group</summary>
+              <div class="cat-content">
+                ${this._renderGroup("horizontal", true)}
+              </div>
+            </details>
+
+            <details>
+              <summary>Vertical group</summary>
+              <div class="cat-content">
+                ${this._renderGroup("vertical", true)}
+              </div>
+            </details>
+          </div>
+        </details>
+
       </div>`;
   }
   static get styles() {
