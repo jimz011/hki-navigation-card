@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.1.0"; // Added perform-action, jinja templating, collapsible sections
+const VERSION = "1.1.1"; // Added perform-action, jinja templating, collapsible sections
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -2015,7 +2015,9 @@ class HkiNavigationCardEditor extends LitElement {
                 ${customElements.get("ha-code-editor") ? html`
                   <ha-code-editor
                     .hass=${this.hass}
-                    .mode=${"yaml"}
+                    mode="yaml"
+                    autocomplete-entities
+                    .autocompleteEntities=${true}
                     .label=${"Label (accepts jinja2 templates)"}
                     .value=${btn.label ?? ""}
                     @value-changed=${(ev) => {
