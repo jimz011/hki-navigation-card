@@ -2076,7 +2076,7 @@ class HkiNavigationCardEditor extends LitElement {
       </div>
     `;
   }
-  _renderGroup(  _renderGroup(group, asBoxContent = false) {
+  _renderGroup(group, asBoxContent = false) {
     const c = this._c;
     const gKey = group === "vertical" ? "vertical" : "horizontal";
     const enabled = !!c[gKey].enabled;
