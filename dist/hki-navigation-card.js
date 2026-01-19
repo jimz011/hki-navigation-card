@@ -1860,10 +1860,9 @@ class HkiNavigationCardEditor extends LitElement {
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
-                <ha-textarea
-                  .label=${"Label (multi-line Jinja2 templates supported)"}
+                <ha-textfield
+                  .label=${"Label"}
                   .value=${btn.label ?? ""}
-                  rows="3"
                   @input=${(ev) => {
                     const newValue = ev.target.value;
                     if (newValue !== btn.label) {
@@ -1876,8 +1875,8 @@ class HkiNavigationCardEditor extends LitElement {
                       setBtnFn(updatedBtn);
                     }
                   }}
-                ></ha-textarea>
-                <p style="font-size: 11px; opacity: 0.7; margin: 4px 0 0 0;">Supports Jinja2: <code>{{ "{{" }} states('sensor.temp') {{ "}}" }}</code>, <code>{{ "{{" }} user {{ "}}" }}</code>, if/else, filters, etc.</p>
+                ></ha-textfield>
+                <div style="font-size: 11px; opacity: 0.7; margin: 4px 0 0 0;">Supports Jinja2 templates like: {{ states('sensor.temp') }}, {{ user }}, if/else, filters, etc.</div>
       </div></details>
 
       <details><summary class="cat-head">Style Overrides</summary><div class="cat-content">
