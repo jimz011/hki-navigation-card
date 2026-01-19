@@ -1818,18 +1818,12 @@ class HkiNavigationCardEditor extends LitElement {
         <ha-yaml-editor
           .hass=${this.hass}
           .label=${"Label (Jinja2 templates supported)"}
-          .value=${btn.label ?? ""}
+          .value=${btn.label || ""}
           @value-changed=${(ev) => {
             ev.stopPropagation();
-            const newValue = ev.detail?.value;
-            console.log('[HKI Nav Debug] ha-yaml-editor value-changed:', {
-              type: typeof newValue,
-              value: newValue,
-              isObject: typeof newValue === 'object',
-              currentLabel: btn.label
-            });
-            if (newValue !== (btn.label ?? "")) {
-              setBtnFn({ ...btn, label: newValue || undefined });
+            const value = ev.detail?.value;
+            if (value !== btn.label) {
+              setBtnFn({ ...btn, label: value || undefined });
             }
           }}
           @click=${(e) => e.stopPropagation()}
