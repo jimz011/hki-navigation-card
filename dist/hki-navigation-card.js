@@ -133,6 +133,17 @@ function deepClone(obj) {
   return obj ? JSON.parse(JSON.stringify(obj)) : obj;
 }
 
+// Simplified hash (djb2) + cache key for template result caching
+function hashStr(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (h * 33) ^ s.charCodeAt(i);
+  return (h >>> 0).toString(16);
+}
+
+function cacheKey(raw, vars) {
+  return `hkiTpl:${hashStr(raw + (vars ? JSON.stringify(vars) : ""))}`;
+}
+
 function clampNum(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -588,7 +599,9 @@ class HkiNavigationCard extends LitElement {
     this._groupOverride = { horizontal: null, vertical: null };
     this._tapState = { lastId: null, lastTime: 0, singleTimer: null };
     this._holdTimers = new Map();
-    this._templateCache = new Map(); // Cache for rendered templates
+    // Template rendering state per button id (label/tooltip)
+    // Map<btnId, { raw: string, sig: string, seq: number, unsub: function|null, rendered: string }>
+    this._tpl = new Map();
     this._layout = { ready: false, slots: {}, meta: {} };
     this._measureRaf = null;
     this._bottomBarMeasureRaf = null;
@@ -652,6 +665,14 @@ class HkiNavigationCard extends LitElement {
     this._disconnectObservers();
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
     if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
+
+    // Unsubscribe all template subscriptions
+    for (const st of this._tpl.values()) {
+      if (st?.unsub) {
+        try { st.unsub(); } catch (_) {}
+      }
+    }
+    this._tpl.clear();
   }
 
   _disconnectObservers() {
@@ -676,9 +697,15 @@ class HkiNavigationCard extends LitElement {
     if (!config) throw new Error("Invalid configuration");
     this._config = normalizeConfig(config);
     this._layout = { ready: false, slots: {}, meta: {} };
-    if (this._templateCache) {
-      this._templateCache.clear(); // Clear cache so templates re-render with new config
+
+    // Clear template state so templates re-render with new config
+    for (const st of this._tpl.values()) {
+      if (st?.unsub) {
+        try { st.unsub(); } catch (_) {}
+      }
     }
+    this._tpl.clear();
+
     this._refreshUiState(true);
     this.requestUpdate();
     this._scheduleMeasure();
@@ -890,87 +917,149 @@ class HkiNavigationCard extends LitElement {
     return s.includes("{{") || s.includes("{%") || s.includes("{#");
   }
 
-  async _renderTemplate(text) {
-    if (!text || typeof text !== 'string') return "";
-    
-    if (!this._isTemplateString(text)) {
-      return text;
+  _getUserVariable() {
+    const u = this.hass?.user;
+    return u?.name || u?.username || u?.id || "";
+  }
+
+  _buildTemplateVariables(btn) {
+    // Keep parity with HKI Header Card and extend with version/button
+    return {
+      config: this._config ?? {},
+      user: this._getUserVariable(),
+      version: VERSION,
+      button: btn ?? {},
+    };
+  }
+
+  _unsubscribeBtnTemplate(btnId) {
+    const st = this._tpl.get(btnId);
+    if (st?.unsub) {
+      try { st.unsub(); } catch (_) {}
     }
-    
-    // Try full jinja2 rendering via Home Assistant
-    if (this.hass?.callWS) {
-      try {
-        const result = await this.hass.callWS({
-          type: "render_template",
-          template: text,
-          variables: { 
-            config: this._config || {},
-            user: this.hass?.user?.name || "User", 
-            version: VERSION 
-          },
-          strict: false,
-        });
-        return result?.result != null ? String(result.result) : text;
-      } catch (err) {
-        console.warn("[HKI Navigation Card] Template render failed:", err);
+    if (st) st.unsub = null;
+  }
+
+  _applyCachedTemplate(sig) {
+    try {
+      const cached = sessionStorage.getItem(sig);
+      if (cached != null && cached !== "") return String(cached);
+    } catch (_) {}
+    return null;
+  }
+
+  _storeTemplateCache(sig, value) {
+    try { sessionStorage.setItem(sig, value); } catch (_) {}
+  }
+
+  async _renderTemplateOnce(btnId, seq, raw, vars, sig) {
+    if (!this.hass?.callWS) return;
+    try {
+      const res = await this.hass.callWS({
+        type: "render_template",
+        template: raw,
+        variables: vars,
+        strict: false,
+      });
+      const st = this._tpl.get(btnId);
+      if (!st || st.seq !== seq) return;
+      const text = res?.result == null ? "" : String(res.result);
+      if (st.rendered !== text) {
+        st.rendered = text;
+        this._storeTemplateCache(sig, text);
+        this.requestUpdate();
       }
+    } catch (err) {
+      console.warn("[HKI Navigation Card] Template render failed:", err);
     }
-    
-    // Fallback to simple replacement
-    let out = text;
-    if (out.includes("{{ user }}")) {
-      const name = this.hass?.user?.name || "User";
-      out = out.replace(/\{\{\s*user\s*\}\}/g, name);
+  }
+
+  async _subscribeTemplate(btnId, seq, raw, vars, sig) {
+    if (!this.hass?.connection?.subscribeMessage) return;
+    try {
+      const unsub = await this.hass.connection.subscribeMessage(
+        (msg) => {
+          const st = this._tpl.get(btnId);
+          if (!st || st.seq !== seq) return;
+          if (msg?.error) {
+            console.warn("[HKI Navigation Card] Template update error:", msg.error);
+            return;
+          }
+          const text = msg?.result == null ? "" : String(msg.result);
+          if (st.rendered !== text) {
+            st.rendered = text;
+            this._storeTemplateCache(sig, text);
+            this.requestUpdate();
+          }
+        },
+        { type: "render_template", template: raw, variables: vars, strict: false, report_errors: false }
+      );
+
+      const st = this._tpl.get(btnId);
+      if (!st || st.seq !== seq) {
+        unsub?.();
+        return;
+      }
+      st.unsub = unsub;
+    } catch (err) {
+      console.warn("[HKI Navigation Card] Template subscription failed:", err);
+      this._renderTemplateOnce(btnId, seq, raw, vars, sig);
     }
-    if (out.includes("{{ version }}")) {
-      out = out.replace(/\{\{\s*version\s*\}\}/g, VERSION);
+  }
+
+  _setupBtnLabelTemplate(btn, raw) {
+    const btnId = btn?.id || "no_id";
+    if (!raw || typeof raw !== "string") {
+      this._unsubscribeBtnTemplate(btnId);
+      this._tpl.delete(btnId);
+      return;
     }
-    return out;
+
+    const isTpl = this._isTemplateString(raw);
+    if (!isTpl) {
+      // Fast-path: just keep plain text and still support {{ user }} / {{ version }} replacements
+      this._unsubscribeBtnTemplate(btnId);
+      const rendered = raw
+        .replace(/\{\{\s*user\s*\}\}/g, this._getUserVariable() || "User")
+        .replace(/\{\{\s*version\s*\}\}/g, VERSION);
+      this._tpl.set(btnId, { raw, sig: "", seq: 0, unsub: null, rendered });
+      return;
+    }
+
+    const vars = this._buildTemplateVariables(btn);
+    const sig = cacheKey(raw, vars);
+    const prev = this._tpl.get(btnId);
+    const nextSeq = (prev?.seq ?? 0) + 1;
+
+    // If nothing changed, keep existing subscription/rendered
+    if (prev && prev.raw === raw && prev.sig === sig) return;
+
+    this._unsubscribeBtnTemplate(btnId);
+
+    const st = { raw, sig, seq: nextSeq, unsub: null, rendered: raw };
+    this._tpl.set(btnId, st);
+
+    // Apply session cache immediately if available
+    const cached = this._applyCachedTemplate(sig);
+    if (cached != null) st.rendered = cached;
+
+    // Prefer subscription so rendered labels update with state changes
+    if (this.hass?.connection?.subscribeMessage) {
+      this._subscribeTemplate(btnId, nextSeq, raw, vars, sig);
+    } else {
+      // Fallback: one-off render
+      this._renderTemplateOnce(btnId, nextSeq, raw, vars, sig);
+    }
   }
 
   _getLabelText(btn) {
     const raw = btn?.label || btn?.tooltip || "";
     if (!raw) return "";
-    
-    const btnId = btn?.id || "no_id";
-    const cacheKey = `${btnId}:${raw}`;
-    
-    // Check cache first - if already rendered, return it
-    if (this._templateCache.has(cacheKey)) {
-      return this._templateCache.get(cacheKey);
-    }
-    
-    // For simple {{ user }} and {{ version }}, do instant sync replacement
-    // For complex templates (states, attributes, etc.), render async via Home Assistant
-    if (!this._isTemplateString(raw) || (raw.includes("{{ user }}") && !raw.includes("states(") && !raw.includes("state_attr("))) {
-      let result = raw;
-      if (raw.includes("{{ user }}")) {
-        const name = this.hass?.user?.name || "User";
-        result = result.replace(/\{\{\s*user\s*\}\}/g, name);
-      }
-      if (raw.includes("{{ version }}")) {
-        result = result.replace(/\{\{\s*version\s*\}\}/g, VERSION);
-      }
-      this._templateCache.set(cacheKey, result);
-      return result;
-    }
-    
-    // For complex templates ({{ states(...) }}, etc.), show raw template briefly while rendering
-    const placeholder = raw;
-    this._templateCache.set(cacheKey, placeholder);
-    
-    // Render async via Home Assistant and update when ready
-    this._renderTemplate(raw).then(rendered => {
-      if (this._templateCache.get(cacheKey) !== rendered) {
-        this._templateCache.set(cacheKey, rendered);
-        this.requestUpdate(); // Trigger re-render to show the rendered value
-      }
-    }).catch(err => {
-      console.warn("[HKI Navigation Card] Template render error:", err);
-      // Keep the placeholder on error
-    });
-    
-    return placeholder;
+
+    this._setupBtnLabelTemplate(btn, raw);
+
+    const st = this._tpl.get(btn?.id || "no_id");
+    return st?.rendered ?? raw;
   }
 
   _getPillWidth(btn) {
@@ -1860,22 +1949,39 @@ class HkiNavigationCardEditor extends LitElement {
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
-                <ha-textfield
-                  .label=${"Label"}
-                  .value=${btn.label ?? ""}
-                  @input=${(ev) => {
-                    const newValue = ev.target.value;
-                    if (newValue !== btn.label) {
-                      const updatedBtn = { ...btn };
-                      if (!newValue || newValue === "") {
-                        delete updatedBtn.label;
-                      } else {
-                        updatedBtn.label = newValue;
+                ${customElements.get("ha-yaml-editor") ? html`
+                  <ha-yaml-editor
+                    .hass=${this.hass}
+                    .label=${"Label (accepts jinja2 templates)"}
+                    .value=${btn.label ?? ""}
+                    @value-changed=${(ev) => {
+                      ev.stopPropagation();
+                      const newValue = ev.detail?.value ?? "";
+                      if (newValue !== (btn.label ?? "")) {
+                        const updatedBtn = { ...btn };
+                        const v = safeString(newValue);
+                        if (!v.trim()) delete updatedBtn.label;
+                        else updatedBtn.label = v;
+                        setBtnFn(updatedBtn);
                       }
-                      setBtnFn(updatedBtn);
-                    }
-                  }}
-                ></ha-textfield>
+                    }}
+                    @click=${(e) => e.stopPropagation()}
+                  ></ha-yaml-editor>
+                ` : html`
+                  <ha-textfield
+                    .label=${"Label (accepts jinja2 templates)"}
+                    .value=${btn.label ?? ""}
+                    @input=${(ev) => {
+                      const newValue = ev.target.value;
+                      if (newValue !== btn.label) {
+                        const updatedBtn = { ...btn };
+                        if (!newValue || newValue === "") delete updatedBtn.label;
+                        else updatedBtn.label = newValue;
+                        setBtnFn(updatedBtn);
+                      }
+                    }}
+                  ></ha-textfield>
+                `}
                 <div style="font-size: 11px; opacity: 0.7; margin: 4px 0 0 0;">Supports Jinja2 templates like: {{ states('sensor.temp') }}, {{ user }}, if/else, filters, etc.</div>
       </div></details>
 
