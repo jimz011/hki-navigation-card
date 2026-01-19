@@ -1817,17 +1817,28 @@ class HkiNavigationCardEditor extends LitElement {
         </div>
         <ha-yaml-editor
           .hass=${this.hass}
-          .label=${"Label (Jinja2 templates supported)"}
+          .label=${"Label"}
           .value=${btn.label || ""}
           @value-changed=${(ev) => {
             ev.stopPropagation();
             const value = ev.detail?.value;
+            console.log('[NAV CARD DEBUG] ha-yaml-editor event:', {
+              rawValue: value,
+              type: typeof value,
+              isString: typeof value === 'string',
+              isObject: typeof value === 'object',
+              stringified: JSON.stringify(value),
+              currentBtnLabel: btn.label
+            });
             if (value !== btn.label) {
-              setBtnFn({ ...btn, label: value || undefined });
+              const updateObj = { ...btn, label: value || undefined };
+              console.log('[NAV CARD DEBUG] Calling setBtnFn with:', updateObj);
+              setBtnFn(updateObj);
             }
           }}
           @click=${(e) => e.stopPropagation()}
         ></ha-yaml-editor>
+        <p style="font-size: 11px; opacity: 0.7; margin: 4px 0 0 0;">Supports Jinja templates: <code>{{ "{{" }} states('sensor.temp') {{ "}}" }}</code>, <code>{{ "{{" }} user {{ "}}" }}</code></p>
       </div></details>
 
       <details><summary class="cat-head">Style Overrides</summary><div class="cat-content">
