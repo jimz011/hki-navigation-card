@@ -1053,7 +1053,20 @@ class HkiNavigationCard extends LitElement {
   }
 
   _getLabelText(btn) {
-    const raw = btn?.label || btn?.tooltip || "";
+    let raw = btn?.label;
+    if (raw == null || raw === "") raw = btn?.tooltip || "";
+
+    // Safety: older editor versions may have stored label as an object
+    if (raw && typeof raw !== "string") {
+      if (typeof raw === "object") {
+        if (typeof raw.value === "string") raw = raw.value;
+        else if (typeof raw.text === "string") raw = raw.text;
+        else raw = "";
+      } else {
+        raw = "";
+      }
+    }
+
     if (!raw) return "";
 
     this._setupBtnLabelTemplate(btn, raw);
@@ -1949,38 +1962,40 @@ class HkiNavigationCardEditor extends LitElement {
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
-                ${customElements.get("ha-yaml-editor") ? html`
-                  <ha-yaml-editor
+                ${customElements.get("ha-code-editor") ? html`
+                  <ha-code-editor
                     .hass=${this.hass}
+                    .mode=${"yaml"}
                     .label=${"Label (accepts jinja2 templates)"}
                     .value=${btn.label ?? ""}
                     @value-changed=${(ev) => {
                       ev.stopPropagation();
-                      const newValue = ev.detail?.value ?? "";
+                      const raw = ev.detail?.value;
+                      const newValue = typeof raw === "string" ? raw : "";
                       if (newValue !== (btn.label ?? "")) {
                         const updatedBtn = { ...btn };
-                        const v = safeString(newValue);
+                        const v = newValue;
                         if (!v.trim()) delete updatedBtn.label;
                         else updatedBtn.label = v;
                         setBtnFn(updatedBtn);
                       }
                     }}
                     @click=${(e) => e.stopPropagation()}
-                  ></ha-yaml-editor>
+                  ></ha-code-editor>
                 ` : html`
-                  <ha-textfield
+                  <ha-textarea
                     .label=${"Label (accepts jinja2 templates)"}
                     .value=${btn.label ?? ""}
-                    @input=${(ev) => {
+                    @change=${(ev) => {
                       const newValue = ev.target.value;
-                      if (newValue !== btn.label) {
+                      if (newValue !== (btn.label ?? "")) {
                         const updatedBtn = { ...btn };
                         if (!newValue || newValue === "") delete updatedBtn.label;
                         else updatedBtn.label = newValue;
                         setBtnFn(updatedBtn);
                       }
                     }}
-                  ></ha-textfield>
+                  ></ha-textarea>
                 `}
                 <div style="font-size: 11px; opacity: 0.7; margin: 4px 0 0 0;">Supports Jinja2 templates like: {{ states('sensor.temp') }}, {{ user }}, if/else, filters, etc.</div>
       </div></details>
