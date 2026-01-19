@@ -588,6 +588,7 @@ class HkiNavigationCard extends LitElement {
     this._groupOverride = { horizontal: null, vertical: null };
     this._tapState = { lastId: null, lastTime: 0, singleTimer: null };
     this._holdTimers = new Map();
+    this._templateCache = new Map(); // Cache for rendered templates
     this._layout = { ready: false, slots: {}, meta: {} };
     this._measureRaf = null;
     this._bottomBarMeasureRaf = null;
@@ -675,6 +676,9 @@ class HkiNavigationCard extends LitElement {
     if (!config) throw new Error("Invalid configuration");
     this._config = normalizeConfig(config);
     this._layout = { ready: false, slots: {}, meta: {} };
+    if (this._templateCache) {
+      this._templateCache.clear(); // Clear cache so templates re-render with new config
+    }
     this._refreshUiState(true);
     this.requestUpdate();
     this._scheduleMeasure();
@@ -881,25 +885,78 @@ class HkiNavigationCard extends LitElement {
     return inferButtonTypeFromLegacy(btn, c.default_button_type);
   }
 
-  _parseTemplate(text) {
-      if (!text || typeof text !== 'string') return "";
-      
-      // Simple template replacement for common cases
-      let out = text;
-      if (out.includes("{{ user }}")) {
-          const name = this.hass?.user?.name || "User";
-          out = out.replace(/\{\{\s*user\s*\}\}/g, name);
+  _isTemplateString(s) {
+    if (typeof s !== "string") return false;
+    return s.includes("{{") || s.includes("{%") || s.includes("{#");
+  }
+
+  async _renderTemplate(text) {
+    if (!text || typeof text !== 'string') return "";
+    
+    if (!this._isTemplateString(text)) {
+      return text;
+    }
+    
+    // Try full jinja2 rendering via Home Assistant
+    if (this.hass?.callWS) {
+      try {
+        const result = await this.hass.callWS({
+          type: "render_template",
+          template: text,
+          variables: { 
+            config: this._config || {},
+            user: this.hass?.user?.name || "User", 
+            version: VERSION 
+          },
+          strict: false,
+        });
+        return result?.result != null ? String(result.result) : text;
+      } catch (err) {
+        console.warn("[HKI Navigation Card] Template render failed:", err);
       }
-      if (out.includes("{{ version }}")) {
-          out = out.replace(/\{\{\s*version\s*\}\}/g, VERSION);
-      }
-      
-      return out;
+    }
+    
+    // Fallback to simple replacement
+    let out = text;
+    if (out.includes("{{ user }}")) {
+      const name = this.hass?.user?.name || "User";
+      out = out.replace(/\{\{\s*user\s*\}\}/g, name);
+    }
+    if (out.includes("{{ version }}")) {
+      out = out.replace(/\{\{\s*version\s*\}\}/g, VERSION);
+    }
+    return out;
   }
 
   _getLabelText(btn) {
     const raw = btn?.label || btn?.tooltip || "";
-    return this._parseTemplate(raw);
+    if (!raw) return "";
+    
+    const btnId = btn?.id || "no_id";
+    const cacheKey = `${btnId}:${raw}`;
+    
+    // Check cache
+    if (this._templateCache.has(cacheKey)) {
+      return this._templateCache.get(cacheKey);
+    }
+    
+    // If it's a template string, render it async
+    if (this._isTemplateString(raw)) {
+      // Set raw text as initial value
+      this._templateCache.set(cacheKey, raw);
+      
+      // Render async
+      this._renderTemplate(raw).then(rendered => {
+        this._templateCache.set(cacheKey, rendered);
+        this.requestUpdate();
+      });
+      
+      return raw;
+    }
+    
+    // Not a template, just cache and return
+    this._templateCache.set(cacheKey, raw);
+    return raw;
   }
 
   _getPillWidth(btn) {
