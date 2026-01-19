@@ -1862,13 +1862,20 @@ class HkiNavigationCardEditor extends LitElement {
         </div>
                 <ha-yaml-editor
                   .hass=${this.hass}
-                  .label=${"Label (Subtitle)"}
-                  .value=${btn.label || ""}
+                  .label=${"Label (multi-line Jinja2 templates supported)"}
+                  .value=${btn.label ?? ""}
                   @value-changed=${(ev) => {
                     ev.stopPropagation();
-                    const value = ev.detail?.value;
-                    if (value !== btn.label) {
-                      setBtnFn({ ...btn, label: value || undefined });
+                    const newValue = ev.detail?.value;
+                    if (newValue !== btn.label) {
+                      // Update button label directly, like header-card does
+                      const updatedBtn = { ...btn };
+                      if (!newValue || newValue === "" || (typeof newValue === 'object' && Object.keys(newValue).length === 0)) {
+                        delete updatedBtn.label;
+                      } else {
+                        updatedBtn.label = newValue;
+                      }
+                      setBtnFn(updatedBtn);
                     }
                   }}
                   @click=${(e) => e.stopPropagation()}
