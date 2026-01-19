@@ -881,30 +881,10 @@ class HkiNavigationCard extends LitElement {
     return inferButtonTypeFromLegacy(btn, c.default_button_type);
   }
 
-  async _parseTemplate(text) {
+  _parseTemplate(text) {
       if (!text || typeof text !== 'string') return "";
       
-      // Check if it contains template syntax
-      const hasTemplate = text.includes("{{") || text.includes("{%") || text.includes("{#");
-      
-      if (!hasTemplate) return text;
-      
-      // Try full jinja2 rendering via Home Assistant
-      if (this.hass?.callWS) {
-        try {
-          const result = await this.hass.callWS({
-            type: "render_template",
-            template: text,
-            variables: { user: this.hass?.user?.name || "User", version: VERSION },
-            strict: false,
-          });
-          return result?.result != null ? String(result.result) : text;
-        } catch (err) {
-          console.warn("[HKI Navigation Card] Template render failed, using fallback:", err);
-        }
-      }
-      
-      // Fallback to simple replacement for {{ user }} and {{ version }}
+      // Simple template replacement for common cases
       let out = text;
       if (out.includes("{{ user }}")) {
           const name = this.hass?.user?.name || "User";
@@ -913,22 +893,13 @@ class HkiNavigationCard extends LitElement {
       if (out.includes("{{ version }}")) {
           out = out.replace(/\{\{\s*version\s*\}\}/g, VERSION);
       }
+      
       return out;
   }
 
   _getLabelText(btn) {
     const raw = btn?.label || btn?.tooltip || "";
-    // Handle async template rendering
-    if (!btn._labelCache || btn._labelCache.raw !== raw) {
-      btn._labelCache = { raw: raw, rendered: raw };
-      this._parseTemplate(raw).then(rendered => {
-        if (btn._labelCache.raw === raw) {
-          btn._labelCache.rendered = rendered;
-          this.requestUpdate();
-        }
-      });
-    }
-    return btn._labelCache.rendered || raw;
+    return this._parseTemplate(raw);
   }
 
   _getPillWidth(btn) {
@@ -1788,9 +1759,9 @@ class HkiNavigationCardEditor extends LitElement {
         ${hasIconPicker ? html`<ha-icon-picker .label=${"Icon"} .value=${btn.icon || ""} @value-changed=${(e) => setBtnFn({ ...btn, icon: e.detail.value })}></ha-icon-picker>` : html`<ha-textfield .label=${"Icon (mdi:...)"} .value=${btn.icon || ""} placeholder="mdi:home" @change=${(e) => setBtnFn({ ...btn, icon: e.target.value })}></ha-textfield>`}
         <div class="grid2">
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
-            ${this._renderTemplateEditor("Label (Jinja2 templates supported)", btn.label, (v) => setBtnFn({ ...btn, label: v }))}
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
+        ${this._renderTemplateEditor("Label (Jinja2 templates supported)", btn.label, (v) => setBtnFn({ ...btn, label: v }))}
       </div></details>
 
       <details><summary class="cat-head">Style Overrides</summary><div class="cat-content">
@@ -1936,7 +1907,7 @@ class HkiNavigationCardEditor extends LitElement {
       .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       .empty { opacity: 0.7; padding: 8px 2px; }
-      ha-textfield, ha-select, ha-entity-picker, ha-selector, ha-yaml-editor { width: 100%; }
+      ha-textfield, ha-select, ha-entity-picker, ha-selector, ha-yaml-editor { width: 100%; display: block; }
       ha-expansion-panel { border-radius: 14px; overflow: hidden; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
       .btn-header { display: flex; align-items: center; gap: 10px; padding-right: 8px; }
       .btn-header-text { flex: 1; min-width: 0; }
