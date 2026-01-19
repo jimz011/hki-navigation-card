@@ -935,28 +935,42 @@ class HkiNavigationCard extends LitElement {
     const btnId = btn?.id || "no_id";
     const cacheKey = `${btnId}:${raw}`;
     
-    // Check cache
+    // Check cache first - if already rendered, return it
     if (this._templateCache.has(cacheKey)) {
       return this._templateCache.get(cacheKey);
     }
     
-    // If it's a template string, render it async
-    if (this._isTemplateString(raw)) {
-      // Set raw text as initial value
-      this._templateCache.set(cacheKey, raw);
-      
-      // Render async
-      this._renderTemplate(raw).then(rendered => {
-        this._templateCache.set(cacheKey, rendered);
-        this.requestUpdate();
-      });
-      
-      return raw;
+    // For simple {{ user }} and {{ version }}, do instant sync replacement
+    // For complex templates (states, attributes, etc.), render async via Home Assistant
+    if (!this._isTemplateString(raw) || (raw.includes("{{ user }}") && !raw.includes("states(") && !raw.includes("state_attr("))) {
+      let result = raw;
+      if (raw.includes("{{ user }}")) {
+        const name = this.hass?.user?.name || "User";
+        result = result.replace(/\{\{\s*user\s*\}\}/g, name);
+      }
+      if (raw.includes("{{ version }}")) {
+        result = result.replace(/\{\{\s*version\s*\}\}/g, VERSION);
+      }
+      this._templateCache.set(cacheKey, result);
+      return result;
     }
     
-    // Not a template, just cache and return
-    this._templateCache.set(cacheKey, raw);
-    return raw;
+    // For complex templates ({{ states(...) }}, etc.), show raw template briefly while rendering
+    const placeholder = raw;
+    this._templateCache.set(cacheKey, placeholder);
+    
+    // Render async via Home Assistant and update when ready
+    this._renderTemplate(raw).then(rendered => {
+      if (this._templateCache.get(cacheKey) !== rendered) {
+        this._templateCache.set(cacheKey, rendered);
+        this.requestUpdate(); // Trigger re-render to show the rendered value
+      }
+    }).catch(err => {
+      console.warn("[HKI Navigation Card] Template render error:", err);
+      // Keep the placeholder on error
+    });
+    
+    return placeholder;
   }
 
   _getPillWidth(btn) {
@@ -1701,16 +1715,20 @@ class HkiNavigationCardEditor extends LitElement {
     return html`<ha-textarea .label=${label} .value=${value || ""} @change=${(e) => { const v = e.target.value; onChange(v); validate(v); }}></ha-textarea>${showError ? html`<ha-alert alert-type="error">YAML error: ${this._yamlErrors[errorKey]}</ha-alert>` : html``}`;
   }
   _renderTemplateEditor(label, value, onChange) {
+    const currentValue = value ?? "";
     return html`
       <ha-yaml-editor
         .hass=${this.hass}
         .label=${label}
-        .value=${value || ""}
+        .value=${currentValue}
         @value-changed=${(ev) => {
           ev.stopPropagation();
-          const newValue = ev.detail?.value;
-          if (newValue !== value) {
-            onChange(newValue || undefined);
+          const newValue = ev.detail?.value ?? "";
+          // Only trigger onChange if value actually changed
+          // Compare strings to handle yaml editor's value normalization
+          if (String(newValue) !== String(currentValue)) {
+            // Pass undefined if empty, otherwise pass the value
+            onChange(newValue === "" ? undefined : newValue);
           }
         }}
         @click=${(e) => e.stopPropagation()}
