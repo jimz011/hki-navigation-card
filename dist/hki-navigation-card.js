@@ -1898,6 +1898,34 @@ class HkiNavigationCardEditor extends LitElement {
     if (customElements.get("ha-selector")) return html`<ha-selector .hass=${this.hass} .label=${label} .selector=${{ navigation: {} }} .value=${val} @value-changed=${(e) => onChange(e.detail?.value ?? "")}></ha-selector>`;
     return html`<ha-textfield .label=${label} .value=${val} placeholder="/lovelace/0" @change=${(e) => onChange(e.target.value)}></ha-textfield>`;
   }
+
+  _renderServicePicker(label, value, onChange) {
+    const val = value || "";
+    // Prefer HA's service picker/selector if available
+    if (customElements.get("ha-service-picker")) {
+      return html`<ha-service-picker
+        .hass=${this.hass}
+        .label=${label}
+        .value=${val}
+        @value-changed=${(e) => onChange(e.detail?.value ?? e.target?.value ?? "")}
+      ></ha-service-picker>`;
+    }
+    if (customElements.get("ha-selector")) {
+      return html`<ha-selector
+        .hass=${this.hass}
+        .label=${label}
+        .selector=${{ service: {} }}
+        .value=${val}
+        @value-changed=${(e) => onChange(e.detail?.value ?? "")}
+      ></ha-selector>`;
+    }
+    return html`<ha-textfield
+      .label=${label}
+      .value=${val}
+      placeholder="light.turn_on"
+      @input=${(e) => onChange(e.target.value)}
+    ></ha-textfield>`;
+  }
   _renderCodeEditor(label, value, onChange, errorKey) {
     const showError = !!this._yamlErrors[errorKey];
     const validate = (v) => {
@@ -1927,49 +1955,52 @@ class HkiNavigationCardEditor extends LitElement {
         ${type === "url" ? html`<ha-textfield .label=${"URL"} .value=${act.url_path || ""} placeholder="https://example.com" @change=${(e) => update({ url_path: e.target.value })}></ha-textfield><ha-formfield .label=${"Open in new tab"}><ha-switch .checked=${act.new_tab !== false} @change=${(e) => update({ new_tab: e.target.checked })}></ha-switch></ha-formfield>` : html``}
         ${type === "toggle-group" ? html`<div class="grid2"><ha-select .label=${"Target group"} .value=${act.target || "vertical"} @selected=${(e) => update({ target: e.target.value })} @closed=${(e) => e.stopPropagation()}>${GROUP_TARGETS.map((g) => html`<mwc-list-item .value=${g.value}>${g.label}</mwc-list-item>`)}</ha-select><ha-select .label=${"Mode"} .value=${act.mode || "toggle"} @selected=${(e) => update({ mode: e.target.value })} @closed=${(e) => e.stopPropagation()}>${GROUP_ACTIONS.map((m) => html`<mwc-list-item .value=${m.value}>${m.label}</mwc-list-item>`)}</ha-select></div><div class="hint">Tip: Disable a group below, then use this action to open it temporarily. It auto-closes after pressing any other button.</div>` : html``}
         ${type === "perform-action" ? html`
-          <ha-textfield .label=${"Service (e.g., light.turn_on)"} .value=${act.perform_action || ""} placeholder="light.turn_on" @change=${(e) => update({ perform_action: e.target.value })}></ha-textfield>
-          ${act.perform_action ? html`
-            <ha-selector
-              .hass=${this.hass}
-              .selector=${{ target: {} }}
-              .label=${"Target (optional)"}
-              .value=${act.target || null}
-              @value-changed=${(ev) => {
-                ev.stopPropagation();
-                const target = ev.detail?.value;
-                if (JSON.stringify(act.target) !== JSON.stringify(target)) {
-                  if (target && Object.keys(target).length > 0) {
-                    update({ target: target });
-                  } else {
-                    const next = { ...act };
-                    delete next.target;
-                    setBtnFn({ ...btn, [which]: next });
-                  }
+
+          ${this._renderServicePicker("Action (service)", act.perform_action || "", (v) => update({ perform_action: v }))}
+          <div class="hint">Tip: After selecting an action/service, the target selector becomes available immediately.</div>
+          <ha-selector
+            .hass=${this.hass}
+            .selector=${{ target: {} }}
+            .label=${"Target (optional)"}
+            .value=${act.target || null}
+            ?disabled=${!act.perform_action}
+            @value-changed=${(ev) => {
+              ev.stopPropagation();
+              const target = ev.detail?.value;
+              if (JSON.stringify(act.target) !== JSON.stringify(target)) {
+                if (target && Object.keys(target).length > 0) {
+                  update({ target: target });
+                } else {
+                  const next = { ...act };
+                  delete next.target;
+                  setBtnFn({ ...btn, [which]: next });
                 }
-              }}
-              @click=${(e) => e.stopPropagation()}
-            ></ha-selector>
-            
-            <ha-yaml-editor
-              .hass=${this.hass}
-              .label=${"Service Data (optional, YAML)"}
-              .value=${act.data || null}
-              @value-changed=${(ev) => {
-                ev.stopPropagation();
-                const data = ev.detail?.value;
-                if (JSON.stringify(act.data) !== JSON.stringify(data)) {
-                  if (data && typeof data === 'object' && Object.keys(data).length > 0) {
-                    update({ data: data });
-                  } else {
-                    const next = { ...act };
-                    delete next.data;
-                    setBtnFn({ ...btn, [which]: next });
-                  }
+              }
+            }}
+            @click=${(e) => e.stopPropagation()}
+          ></ha-selector>
+
+          <ha-yaml-editor
+            .hass=${this.hass}
+            .label=${"Service Data (optional, YAML)"}
+            .value=${act.data || null}
+            ?disabled=${!act.perform_action}
+            @value-changed=${(ev) => {
+              ev.stopPropagation();
+              const data = ev.detail?.value;
+              if (JSON.stringify(act.data) !== JSON.stringify(data)) {
+                if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                  update({ data: data });
+                } else {
+                  const next = { ...act };
+                  delete next.data;
+                  setBtnFn({ ...btn, [which]: next });
                 }
-              }}
-              @click=${(e) => e.stopPropagation()}
-            ></ha-yaml-editor>
-          ` : ''}
+              }
+            }}
+            @click=${(e) => e.stopPropagation()}
+          ></ha-yaml-editor>
+
         ` : html``}
         ${type === "toggle" || type === "more-info" ? html`<div class="hint">Uses the button’s <b>Entity</b> field (set above in Interaction & Data).</div>` : html``}
         ${type === "back" ? html`<div class="hint">Back uses browser history. (Tap action forces icon to mdi:chevron-left.)</div>` : html``}
@@ -2015,9 +2046,7 @@ class HkiNavigationCardEditor extends LitElement {
                 ${customElements.get("ha-code-editor") ? html`
                   <ha-code-editor
                     .hass=${this.hass}
-                    mode="yaml"
-                    autocomplete-entities
-                    .autocompleteEntities=${true}
+                    .mode=${"yaml"}
                     .label=${"Label (accepts jinja2 templates)"}
                     .value=${btn.label ?? ""}
                     @value-changed=${(ev) => {
