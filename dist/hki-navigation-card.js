@@ -1633,7 +1633,52 @@ class HkiNavigationCardEditor extends LitElement {
   constructor() { super(); this._expanded = {}; this._yamlErrors = {}; }
   setConfig(config) { this._config = normalizeConfig(config); }
   get _c() { return this._config || normalizeConfig({}); }
-  _emit(cfg) { this._config = cfg; fireEvent(this, "config-changed", { config: cfg }); }
+  _cleanupConfig(config) {
+    if (!config || typeof config !== 'object') return config;
+    
+    const clean = Array.isArray(config) ? [...config] : { ...config };
+    
+    Object.keys(clean).forEach(key => {
+      const value = clean[key];
+      
+      // Remove empty strings
+      if (value === "") {
+        delete clean[key];
+        return;
+      }
+      
+      // Remove empty objects
+      if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) {
+        delete clean[key];
+        return;
+      }
+      
+      // Remove empty arrays
+      if (Array.isArray(value) && value.length === 0) {
+        delete clean[key];
+        return;
+      }
+      
+      // Recursively clean nested objects and arrays
+      if (value && typeof value === 'object') {
+        clean[key] = this._cleanupConfig(value);
+        // After cleaning, remove if it became empty
+        if (typeof clean[key] === 'object' && !Array.isArray(clean[key]) && Object.keys(clean[key]).length === 0) {
+          delete clean[key];
+        } else if (Array.isArray(clean[key]) && clean[key].length === 0) {
+          delete clean[key];
+        }
+      }
+    });
+    
+    return clean;
+  }
+  
+  _emit(cfg) { 
+    const cleaned = this._cleanupConfig(cfg);
+    this._config = cleaned; 
+    fireEvent(this, "config-changed", { config: cleaned }); 
+  }
   _applyGlobalAndClearOverrides(keyPath, mutateFn) {
     const cfg = deepClone(this._c);
     mutateFn(cfg);
