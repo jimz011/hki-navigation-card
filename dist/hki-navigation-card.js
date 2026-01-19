@@ -362,6 +362,10 @@ const DEFAULT_BUTTON = () => ({
   button_type: "",
   background: "",
   background_opacity: "",
+  border_radius: "",
+  border_style: "",
+  border_width: "",
+  border_color: "",
   icon_color: "",
   label_style: {},
   pill_width: "",
@@ -386,6 +390,10 @@ const DEFAULTS = {
   vertical: { enabled: false, rows: 6, buttons: [] },
   default_background: "",
   default_button_opacity: 1,
+  default_border_radius: 999,
+  default_border_style: "solid",
+  default_border_width: 0,
+  default_border_color: "",
   default_icon_color: "",
   button_box_shadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
   button_box_shadow_hover: "0 10px 30px rgba(0, 0, 0, 0.42)",
@@ -524,6 +532,10 @@ function normalizeConfig(cfg) {
   c.button_box_shadow = (typeof raw.button_box_shadow === "string") ? raw.button_box_shadow : DEFAULTS.button_box_shadow;
   c.button_box_shadow_hover = (typeof raw.button_box_shadow_hover === "string") ? raw.button_box_shadow_hover : DEFAULTS.button_box_shadow_hover;
   c.default_button_opacity = Math.max(0, Math.min(1, clampNum(c.default_button_opacity, DEFAULTS.default_button_opacity)));
+  c.default_border_radius = Math.max(0, clampNum(raw.default_border_radius, DEFAULTS.default_border_radius));
+  c.default_border_style = (typeof raw.default_border_style === "string") ? raw.default_border_style : DEFAULTS.default_border_style;
+  c.default_border_width = Math.max(0, clampNum(raw.default_border_width, DEFAULTS.default_border_width));
+  c.default_border_color = (typeof raw.default_border_color === "string") ? raw.default_border_color : DEFAULTS.default_border_color;
 
   c.horizontal.enabled = !!c.horizontal.enabled;
   c.horizontal.columns = Math.max(1, clampInt(c.horizontal.columns, DEFAULTS.horizontal.columns, 1));
@@ -1099,6 +1111,30 @@ class HkiNavigationCard extends LitElement {
     return btn?.icon_color || this._config.default_icon_color || "var(--text-primary-color, var(--primary-text-color))";
   }
 
+  _buttonBorderRadius(btn) {
+    if (_hasMeaningfulNumber(btn?.border_radius)) return Math.max(0, _toNumber(btn.border_radius));
+    return Math.max(0, clampNum(this._config.default_border_radius, DEFAULTS.default_border_radius));
+  }
+
+  _buttonBorderWidth(btn) {
+    if (_hasMeaningfulNumber(btn?.border_width)) return Math.max(0, _toNumber(btn.border_width));
+    return Math.max(0, clampNum(this._config.default_border_width, DEFAULTS.default_border_width));
+  }
+
+  _buttonBorderStyle(btn) {
+    const per = safeString(btn?.border_style).trim();
+    if (per) return per;
+    const g = safeString(this._config.default_border_style).trim();
+    return g || "solid";
+  }
+
+  _buttonBorderColor(btn) {
+    const per = safeString(btn?.border_color).trim();
+    if (per) return per;
+    const g = safeString(this._config.default_border_color).trim();
+    return g || "var(--divider-color)";
+  }
+
   _labelBubbleStyle(btn) {
     const merged = mergeLabelStyle(this._config.label_style, btn?.label_style);
     const bg = merged.background && merged.background !== ""
@@ -1557,7 +1593,12 @@ class HkiNavigationCard extends LitElement {
     const icon = isBackTap ? "mdi:chevron-left" : (btn.icon && btn.icon.trim()) ? btn.icon : "mdi:circle";
     const pillWidth = isPill ? this._getPillWidth(btn) : 0;
     const pillFixed = isPill && pillWidth > 0;
-    const btnStyleParts = [`background:${bg}`, `color:${iconColor}`];
+    const radius = this._buttonBorderRadius(btn);
+    const bw = this._buttonBorderWidth(btn);
+    const bs = this._buttonBorderStyle(btn);
+    const bc = this._buttonBorderColor(btn);
+    const btnStyleParts = [`background:${bg}`, `color:${iconColor}`, `border-radius:${radius}px`];
+    btnStyleParts.push(bw > 0 ? `border:${bw}px ${bs} ${bc}` : `border:none`);
     if (pillFixed) btnStyleParts.push(`width:${pillWidth}px`);
     if (typeof btn.box_shadow === "string" && btn.box_shadow.trim()) btnStyleParts.push(`--hki-button-shadow:${btn.box_shadow.trim()}`);
     if (typeof btn.box_shadow_hover === "string" && btn.box_shadow_hover.trim()) btnStyleParts.push(`--hki-button-shadow-hover:${btn.box_shadow_hover.trim()}`);
@@ -1796,6 +1837,10 @@ class HkiNavigationCardEditor extends LitElement {
       if (keyPath === "pill_width") { b.pill_width = ""; return b; }
       if (keyPath === "background") { b.background = ""; return b; }
       if (keyPath === "background_opacity") { b.background_opacity = ""; return b; }
+      if (keyPath === "border_radius") { b.border_radius = ""; return b; }
+      if (keyPath === "border_style") { b.border_style = ""; return b; }
+      if (keyPath === "border_width") { b.border_width = ""; return b; }
+      if (keyPath === "border_color") { b.border_color = ""; return b; }
       if (keyPath === "icon_color") { b.icon_color = ""; return b; }
       return b;
     };
@@ -1817,6 +1862,10 @@ class HkiNavigationCardEditor extends LitElement {
   _setDefaultBackground(value) { this._applyGlobalAndClearOverrides("background", (cfg) => { cfg.default_background = value; }); }
   _setDefaultIconColor(value) { this._applyGlobalAndClearOverrides("icon_color", (cfg) => { cfg.default_icon_color = value; }); }
   _setDefaultButtonOpacity(value) { this._applyGlobalAndClearOverrides("background_opacity", (cfg) => { cfg.default_button_opacity = Math.max(0, Math.min(1, Number(value))); }); }
+  _setDefaultBorderRadius(value) { this._applyGlobalAndClearOverrides("border_radius", (cfg) => { cfg.default_border_radius = Math.max(0, Number(value)); }); }
+  _setDefaultBorderStyle(value) { this._applyGlobalAndClearOverrides("border_style", (cfg) => { cfg.default_border_style = safeString(value).trim(); }); }
+  _setDefaultBorderWidth(value) { this._applyGlobalAndClearOverrides("border_width", (cfg) => { cfg.default_border_width = Math.max(0, Number(value)); }); }
+  _setDefaultBorderColor(value) { this._applyGlobalAndClearOverrides("border_color", (cfg) => { cfg.default_border_color = safeString(value); }); }
   _setGlobalPillWidth(value) { this._applyGlobalAndClearOverrides("pill_width", (cfg) => { const n = Number(value); cfg.pill_width = n <= 0 ? 0 : Math.max(MIN_PILL_WIDTH, n); }); }
   _listKey(group) { return group === "vertical" ? "vertical" : "horizontal"; }
   _getButtons(group) { const g = this._listKey(group); return (this._c[g]?.buttons || []); }
@@ -1962,6 +2011,7 @@ class HkiNavigationCardEditor extends LitElement {
             <ha-select .label=${"Button Type"} .value=${effectiveType} @selected=${(e) => { const v = e.target.value; setBtnFn({ ...btn, button_type: v === INHERIT ? "" : v }); }} @closed=${(e) => e.stopPropagation()}><mwc-list-item .value=${INHERIT}>(inherit default)</mwc-list-item>${BUTTON_TYPES.map((t) => html`<mwc-list-item .value=${t.value}>${t.label}</mwc-list-item>`)}</ha-select>
             <ha-textfield .label=${"Tooltip (optional)"} .value=${btn.tooltip || ""} @change=${(e) => setBtnFn({ ...btn, tooltip: e.target.value })}></ha-textfield>
         </div>
+        <div class="subheader" style="margin: 10px 0 6px 0;">Button label</div>
                 ${customElements.get("ha-code-editor") ? html`
                   <ha-code-editor
                     .hass=${this.hass}
@@ -2011,6 +2061,10 @@ class HkiNavigationCardEditor extends LitElement {
         <div class="grid2">
             <ha-textfield .label=${"Background (optional override)"} .value=${btn.background || ""} placeholder="(blank = theme accent/primary)" @change=${(e) => setBtnFn({ ...btn, background: e.target.value })}></ha-textfield>
             <ha-textfield type="number" step="0.01" min="0" max="1" .label=${"Button background opacity override (0..1)"} .value=${btn.background_opacity ?? ""} @change=${(e) => setBtnFn({ ...btn, background_opacity: e.target.value })}></ha-textfield>
+            <ha-textfield type="number" .label=${"Border radius override (px) — blank = inherit"} .value=${btn.border_radius ?? ""} @change=${(e) => setBtnFn({ ...btn, border_radius: e.target.value })}></ha-textfield>
+            <ha-textfield type="number" .label=${"Border width override (px) — blank = inherit"} .value=${btn.border_width ?? ""} @change=${(e) => setBtnFn({ ...btn, border_width: e.target.value })}></ha-textfield>
+            <ha-textfield .label=${"Border style override — blank = inherit"} .value=${btn.border_style || ""} placeholder="solid, dashed, dotted, ..." @change=${(e) => setBtnFn({ ...btn, border_style: e.target.value })}></ha-textfield>
+            <ha-textfield .label=${"Border color override (CSS) — blank = inherit"} .value=${btn.border_color || ""} placeholder="(blank = inherit)" @change=${(e) => setBtnFn({ ...btn, border_color: e.target.value })}></ha-textfield>
             <ha-textfield .label=${"Icon color (optional override)"} .value=${btn.icon_color || ""} placeholder="(blank = theme text color)" @change=${(e) => setBtnFn({ ...btn, icon_color: e.target.value })}></ha-textfield>
         </div>
         <div class="grid2"><ha-textfield .label=${"Box-shadow (optional override)"} .value=${btn.box_shadow || ""} placeholder="(blank = global/default)" @change=${(e) => setBtnFn({ ...btn, box_shadow: e.target.value })}></ha-textfield><ha-textfield .label=${"Box-shadow hover (optional override)"} .value=${btn.box_shadow_hover || ""} placeholder="(blank = global/default)" @change=${(e) => setBtnFn({ ...btn, box_shadow_hover: e.target.value })}></ha-textfield></div>
@@ -2136,6 +2190,7 @@ class HkiNavigationCardEditor extends LitElement {
           <div class="box-content">
           <div class="grid2">
             <ha-formfield .label=${"Reserve bottom space"}><ha-switch .checked=${!!c.reserve_space} @change=${(e) => this._setBool("reserve_space", e.target.checked)}></ha-switch></ha-formfield>
+            ${c.reserve_space ? html`<div class="hint" style="grid-column: 1/-1; margin-top: -6px;">ℹ️ <b>Reserve bottom space</b> only works when this card is the <b>last card</b> on the view (so the spacer ends up at the bottom of the page).</div>` : html``}
             <ha-select .label=${"Position"} .value=${c.position} @selected=${(e) => this._setValue("position", e.target.value)} @closed=${(e) => e.stopPropagation()}><mwc-list-item value="bottom-left">Bottom left</mwc-list-item><mwc-list-item value="bottom-center">Bottom center</mwc-list-item><mwc-list-item value="bottom-right">Bottom right</mwc-list-item></ha-select>
             <ha-textfield type="number" .label=${"Offset X (px)"} .value=${String(c.offset_x)} @change=${(e) => this._setValue("offset_x", Number(e.target.value))}></ha-textfield>
             <ha-textfield type="number" .label=${"Offset Y (px)"} .value=${String(c.offset_y)} @change=${(e) => this._setValue("offset_y", Number(e.target.value))}></ha-textfield>
@@ -2169,6 +2224,10 @@ class HkiNavigationCardEditor extends LitElement {
                   <ha-textfield .label=${"Default background (optional override)"} .value=${c.default_background || ""} placeholder="(blank = theme accent/primary)" @change=${(e) => this._setDefaultBackground(e.target.value)}></ha-textfield>
                   <ha-textfield type="number" step="0.01" min="0" max="1" .label=${"Default button background opacity (0..1)"} .value=${String(c.default_button_opacity ?? 1)} @change=${(e) => this._setDefaultButtonOpacity(e.target.value)}></ha-textfield>
                   <ha-textfield .label=${"Default icon color (optional override)"} .value=${c.default_icon_color || ""} placeholder="(blank = theme text color)" @change=${(e) => this._setDefaultIconColor(e.target.value)}></ha-textfield>
+                  <ha-textfield type="number" .label=${"Default border radius (px)"} .value=${String(c.default_border_radius ?? DEFAULTS.default_border_radius)} @change=${(e) => this._setDefaultBorderRadius(e.target.value)}></ha-textfield>
+                  <ha-textfield type="number" .label=${"Default border width (px)"} .value=${String(c.default_border_width ?? DEFAULTS.default_border_width)} @change=${(e) => this._setDefaultBorderWidth(e.target.value)}></ha-textfield>
+                  <ha-textfield .label=${"Default border style"} .value=${c.default_border_style || DEFAULTS.default_border_style} placeholder="solid, dashed, dotted, ..." @change=${(e) => this._setDefaultBorderStyle(e.target.value)}></ha-textfield>
+                  <ha-textfield .label=${"Default border color (CSS)"} .value=${c.default_border_color || ""} placeholder="(blank = theme divider color)" @change=${(e) => this._setDefaultBorderColor(e.target.value)}></ha-textfield>
                 </div>
               </div>
             </details>
