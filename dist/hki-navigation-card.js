@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.1.0"; // Added perform-action, jinja templating, collapsible sections
+const VERSION = "1.1.1"; // Added perform-action, jinja templating, collapsible sections
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -1761,7 +1761,7 @@ class HkiNavigationCard extends LitElement {
       .fab-icon { --mdc-icon-size: calc(var(--hki-size) * 0.48); width: var(--mdc-icon-size); height: var(--mdc-icon-size); }
       .fab-pill { width: auto; min-width: max(var(--hki-size), ${MIN_PILL_WIDTH}px); padding: 0 calc(var(--hki-size) * 0.32); gap: calc(var(--hki-size) * 0.14); justify-content: center; border-radius: 999px; }
       .pill-fixed { padding: 0 calc(var(--hki-size) * 0.24); min-width: ${MIN_PILL_WIDTH}px; }
-      .pill-text { line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+      .pill-text { line-height: 1; white-space: nowrap; overflow: visible; text-overflow: ellipsis; max-width: 260px; }
       .label { pointer-events: none; line-height: 1.1; border-radius: 999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .label-float { position: absolute; }
     `;
@@ -1773,7 +1773,7 @@ class HkiNavigationCardEditor extends LitElement {
   static get properties() {
     return { hass: {}, _config: { state: true }, _expanded: { state: true }, _yamlErrors: { state: true } };
   }
-  constructor() { super(); this._expanded = {}; this._yamlErrors = {}; }
+  constructor() { super(); this._expanded = {}; this._yamlErrors = {}; this._paDomainCache = {}; }
   setConfig(config) { this._config = normalizeConfig(config); }
   get _c() { return this._config || normalizeConfig({}); }
   _cleanupConfig(config) {
@@ -1927,49 +1927,104 @@ class HkiNavigationCardEditor extends LitElement {
         ${type === "url" ? html`<ha-textfield .label=${"URL"} .value=${act.url_path || ""} placeholder="https://example.com" @change=${(e) => update({ url_path: e.target.value })}></ha-textfield><ha-formfield .label=${"Open in new tab"}><ha-switch .checked=${act.new_tab !== false} @change=${(e) => update({ new_tab: e.target.checked })}></ha-switch></ha-formfield>` : html``}
         ${type === "toggle-group" ? html`<div class="grid2"><ha-select .label=${"Target group"} .value=${act.target || "vertical"} @selected=${(e) => update({ target: e.target.value })} @closed=${(e) => e.stopPropagation()}>${GROUP_TARGETS.map((g) => html`<mwc-list-item .value=${g.value}>${g.label}</mwc-list-item>`)}</ha-select><ha-select .label=${"Mode"} .value=${act.mode || "toggle"} @selected=${(e) => update({ mode: e.target.value })} @closed=${(e) => e.stopPropagation()}>${GROUP_ACTIONS.map((m) => html`<mwc-list-item .value=${m.value}>${m.label}</mwc-list-item>`)}</ha-select></div><div class="hint">Tip: Disable a group below, then use this action to open it temporarily. It auto-closes after pressing any other button.</div>` : html``}
         ${type === "perform-action" ? html`
-          <ha-textfield .label=${"Service (e.g., light.turn_on)"} .value=${act.perform_action || ""} placeholder="light.turn_on" @change=${(e) => update({ perform_action: e.target.value })}></ha-textfield>
-          ${act.perform_action ? html`
-            <ha-selector
+          ${customElements.get("ha-service-picker") ? html`
+            <ha-service-picker
               .hass=${this.hass}
-              .selector=${{ target: {} }}
-              .label=${"Target (optional)"}
-              .value=${act.target || null}
+              .label=${"Action (service)"}
+              .value=${act.perform_action || ""}
               @value-changed=${(ev) => {
                 ev.stopPropagation();
-                const target = ev.detail?.value;
-                if (JSON.stringify(act.target) !== JSON.stringify(target)) {
-                  if (target && Object.keys(target).length > 0) {
-                    update({ target: target });
-                  } else {
-                    const next = { ...act };
-                    delete next.target;
-                    setBtnFn({ ...btn, [which]: next });
-                  }
-                }
+                const v = ev.detail?.value ?? ev.target?.value ?? "";
+                update({ perform_action: safeString(v) });
               }}
               @click=${(e) => e.stopPropagation()}
-            ></ha-selector>
-            
-            <ha-yaml-editor
-              .hass=${this.hass}
-              .label=${"Service Data (optional, YAML)"}
-              .value=${act.data || null}
-              @value-changed=${(ev) => {
-                ev.stopPropagation();
-                const data = ev.detail?.value;
-                if (JSON.stringify(act.data) !== JSON.stringify(data)) {
-                  if (data && typeof data === 'object' && Object.keys(data).length > 0) {
-                    update({ data: data });
-                  } else {
-                    const next = { ...act };
-                    delete next.data;
-                    setBtnFn({ ...btn, [which]: next });
-                  }
+            ></ha-service-picker>
+          ` : html`
+            ${(() => {
+              const key = `${btn?.id || ''}:${which}`;
+              const full = safeString(act.perform_action);
+              const derivedDomain = full.includes('.') ? full.split('.')[0] : '';
+              const cachedDomain = this._paDomainCache?.[key] || '';
+              const domain = cachedDomain || derivedDomain;
+              const derivedService = (full.includes('.') && derivedDomain === domain) ? (full.split('.')[1] || '') : '';
+              const services = (domain && this.hass?.services?.[domain]) ? Object.keys(this.hass.services[domain]).sort() : [];
+              return html`
+                <div class="grid2">
+                  <ha-select
+                    .label=${"Domain"}
+                    .value=${domain || undefined}
+                    @selected=${(e) => {
+                      const nextDomain = e.target.value || '';
+                      this._paDomainCache[key] = nextDomain;
+                      // Clear service when domain changes
+                      update({ perform_action: '' });
+                      this.requestUpdate();
+                    }}
+                    @closed=${(e) => e.stopPropagation()}
+                  >
+                    <mwc-list-item value=""></mwc-list-item>
+                    ${Object.keys(this.hass?.services || {}).sort().map((d) => html`<mwc-list-item .value=${d}>${d}</mwc-list-item>`)}
+                  </ha-select>
+
+                  <ha-select
+                    .label=${"Service"}
+                    .value=${derivedService || undefined}
+                    .disabled=${!domain}
+                    @selected=${(e) => {
+                      const service = e.target.value || '';
+                      const d = this._paDomainCache[key] || domain;
+                      update({ perform_action: (d && service) ? `${d}.${service}` : '' });
+                    }}
+                    @closed=${(e) => e.stopPropagation()}
+                  >
+                    <mwc-list-item value=""></mwc-list-item>
+                    ${services.map((s) => html`<mwc-list-item .value=${s}>${s}</mwc-list-item>`)}
+                  </ha-select>
+                </div>
+              `;
+            })()}
+          `}
+
+          <ha-selector
+            .hass=${this.hass}
+            .selector=${{ target: {} }}
+            .label=${"Target (optional)"}
+            .value=${act.target || null}
+            @value-changed=${(ev) => {
+              ev.stopPropagation();
+              const target = ev.detail?.value;
+              if (JSON.stringify(act.target) !== JSON.stringify(target)) {
+                if (target && Object.keys(target).length > 0) {
+                  update({ target: target });
+                } else {
+                  const next = { ...act };
+                  delete next.target;
+                  setBtnFn({ ...btn, [which]: next });
                 }
-              }}
-              @click=${(e) => e.stopPropagation()}
-            ></ha-yaml-editor>
-          ` : ''}
+              }
+            }}
+            @click=${(e) => e.stopPropagation()}
+          ></ha-selector>
+
+          <ha-yaml-editor
+            .hass=${this.hass}
+            .label=${"Service Data (optional, YAML)"}
+            .value=${act.data || null}
+            @value-changed=${(ev) => {
+              ev.stopPropagation();
+              const data = ev.detail?.value;
+              if (JSON.stringify(act.data) !== JSON.stringify(data)) {
+                if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                  update({ data: data });
+                } else {
+                  const next = { ...act };
+                  delete next.data;
+                  setBtnFn({ ...btn, [which]: next });
+                }
+              }
+            }}
+            @click=${(e) => e.stopPropagation()}
+          ></ha-yaml-editor>
         ` : html``}
         ${type === "toggle" || type === "more-info" ? html`<div class="hint">Uses the button’s <b>Entity</b> field (set above in Interaction & Data).</div>` : html``}
         ${type === "back" ? html`<div class="hint">Back uses browser history. (Tap action forces icon to mdi:chevron-left.)</div>` : html``}
@@ -2016,6 +2071,8 @@ class HkiNavigationCardEditor extends LitElement {
                   <ha-code-editor
                     .hass=${this.hass}
                     .mode=${"yaml"}
+                    autocomplete-entities
+                    .autocompleteEntities=${true}
                     .label=${"Label (accepts jinja2 templates)"}
                     .value=${btn.label ?? ""}
                     @value-changed=${(ev) => {
@@ -2294,9 +2351,10 @@ class HkiNavigationCardEditor extends LitElement {
       .section-title { font-weight: 800; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
       .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .grid2 > * { min-width: 0; }
       .empty { opacity: 0.7; padding: 8px 2px; }
-      ha-textfield, ha-select, ha-entity-picker, ha-selector, ha-yaml-editor { width: 100%; display: block; }
-      ha-expansion-panel { border-radius: 14px; overflow: hidden; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
+      ha-textfield, ha-select, ha-service-picker, ha-entity-picker, ha-selector, ha-yaml-editor { width: 100%; max-width: 100%; display: block; }
+      ha-expansion-panel { border-radius: 14px; overflow: visible; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
       .btn-header { display: flex; align-items: center; gap: 10px; padding-right: 8px; }
       .btn-header-text { flex: 1; min-width: 0; }
       .btn-title { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2318,7 +2376,7 @@ class HkiNavigationCardEditor extends LitElement {
         background: var(--secondary-background-color);
         border-radius: 4px;
         margin-bottom: 8px;
-        overflow: hidden;
+        overflow: visible;
         border: 1px solid var(--divider-color);
       }
       details.box-section > summary {
@@ -2349,7 +2407,7 @@ class HkiNavigationCardEditor extends LitElement {
       }
       
       /* Keep existing category styles for nested details */
-      details { margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(128, 128, 128, 0.15); overflow: hidden; }
+      details { margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(128, 128, 128, 0.15); overflow: visible; }
       details > summary { list-style: none; padding: 10px 12px; font-weight: 700; cursor: pointer; user-select: none; background: rgba(0,0,0,0.02); display: flex; align-items: center; outline: none; }
       details > summary::-webkit-details-marker { display: none; }
       details > summary::after { content: "▼"; font-size: 10px; margin-left: auto; opacity: 0.6; transition: transform 0.2s; }
