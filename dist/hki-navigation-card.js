@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.1.0"; // Added perform-action, jinja templating, collapsible sections
+const VERSION = "1.1.1"; // Added perform-action, jinja templating, collapsible sections
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -2007,45 +2007,63 @@ class HkiNavigationCardEditor extends LitElement {
     const parts = safeString(val).split(".");
     const currentDomain = parts.length === 2 ? parts[0] : "";
     const currentService = parts.length === 2 ? parts[1] : "";
-    // Keep a temporary domain selection until a service is selected (prevents the service dropdown staying disabled)
-    const tempDomain = this._servicePickerDomainTemp || "";
+    // Temporary domain selection: when the user picks a new domain, prefer it until a service is chosen.
+    const tempDomain = safeString(this._servicePickerDomainTemp);
+    const hasTempDomain = !!tempDomain;
 
-    if (services && typeof services === "object") {      const domains = Object.keys(services).sort();
-      const domain = domains.includes(currentDomain) ? currentDomain : (domains.includes(tempDomain) ? tempDomain : "");
+    if (services && typeof services === "object") {
+      const domains = Object.keys(services).sort();
+      const domain = hasTempDomain
+        ? (domains.includes(tempDomain) ? tempDomain : "")
+        : (domains.includes(currentDomain) ? currentDomain : "");
+
       const serviceNames = domain ? Object.keys(services[domain] || {}).sort() : [];
-      const service = serviceNames.includes(currentService) ? currentService : "";
+      // When a temporary domain is active, reset service until the user picks one.
+      const service = hasTempDomain ? "" : (serviceNames.includes(currentService) ? currentService : "");
       return html`
         <div class="subheader" style="margin-top: 6px;">${label}</div>
         <div class="grid2">
           <ha-select
             .label=${"Domain"}
-            .value=${domain}
+            .value=${domain || undefined}
             @selected=${(e) => {
               const d = e.target.value;
-              this._servicePickerDomainTemp = d || "";
-              // Do not write an incomplete service string into the config; wait until a service is selected.
+              if (!d) {
+                // Clear selection + clear any partially built service.
+                this._servicePickerDomainTemp = "";
+                onChange("");
+              } else {
+                // Store domain temporarily; service list should refresh immediately.
+                this._servicePickerDomainTemp = d;
+              }
               this.requestUpdate();
             }}
             @closed=${(e) => e.stopPropagation()}
           >
-            <mwc-list-item value="" ?selected=${!domain}>(select)</mwc-list-item>
+            <mwc-list-item value="">(clear)</mwc-list-item>
             ${domains.map((d) => html`<mwc-list-item .value=${d}>${d}</mwc-list-item>`)}
           </ha-select>
 
           <ha-select
             .label=${"Service"}
-            .value=${service}
+            .value=${service || undefined}
             ?disabled=${!domain}
             @selected=${(e) => {
               const svc = e.target.value;
-              if (domain && svc) {
+              if (!svc) {
+                // Clear only the chosen service; keep current domain selection.
+                onChange("");
+                this.requestUpdate();
+                return;
+              }
+              if (domain) {
                 this._servicePickerDomainTemp = "";
                 onChange(`${domain}.${svc}`);
               }
             }}
             @closed=${(e) => e.stopPropagation()}
           >
-            <mwc-list-item value="" ?selected=${!service}>(select)</mwc-list-item>
+            <mwc-list-item value="">(clear)</mwc-list-item>
             ${serviceNames.map((s) => html`<mwc-list-item .value=${s}>${s}</mwc-list-item>`)}
           </ha-select>
         </div>
@@ -2500,6 +2518,7 @@ class HkiNavigationCardEditor extends LitElement {
       .section-title { font-weight: 800; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
       .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .grid2 > * { min-width: 0; }
       .empty { opacity: 0.7; padding: 8px 2px; }
       ha-textfield, ha-select, ha-entity-picker, ha-selector, ha-yaml-editor { width: 100%; display: block; }
       ha-expansion-panel { border-radius: 14px; overflow: visible; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
@@ -2524,7 +2543,7 @@ class HkiNavigationCardEditor extends LitElement {
         background: var(--secondary-background-color);
         border-radius: 4px;
         margin-bottom: 8px;
-        overflow: hidden;
+        overflow: visible;
         border: 1px solid var(--divider-color);
       }
       details.box-section > summary {
