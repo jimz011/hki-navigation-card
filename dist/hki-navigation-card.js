@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.1.0"; // Added perform-action, jinja templating, collapsible sections
+const VERSION = "1.1.1"; // Added perform-action, jinja templating, collapsible sections
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -1942,13 +1942,51 @@ class HkiNavigationCardEditor extends LitElement {
     if (customElements.get("ha-selector")) return html`<ha-selector .hass=${this.hass} .label=${label} .selector=${{ navigation: {} }} .value=${val} @value-changed=${(e) => onChange(e.detail?.value ?? "")}></ha-selector>`;
     return html`<ha-textfield .label=${label} .value=${val} placeholder="/lovelace/0" @change=${(e) => onChange(e.target.value)}></ha-textfield>`;
   }
-
   _renderServicePicker(label, value, onChange) {
     const val = value || "";
-    // NOTE: HA's built-in "service" selector is not available/registered in all HA versions.
-    // To guarantee a working UI (and match Bubble Card's intent), we provide an explicit
-    // domain+service picker powered by hass.services.
 
+    // Try to use Home Assistant's built-in ha-service-picker (Bubble Card style).
+    // If it isn't registered yet, we attempt a few lazy imports and re-render when available.
+    if (!this._hkiServicePickerLoadAttempted) {
+      this._hkiServicePickerLoadAttempted = true;
+      (async () => {
+        if (customElements.get("ha-service-picker")) return;
+        const candidates = [
+          "/frontend_latest/components/ha-service-picker.js",
+          "/frontend_latest/components/ha-service-picker",
+          "/frontend_latest/components/ha-service-picker.ts",
+          "/frontend_latest/components/ha-service-picker",
+          "/frontend_es5/components/ha-service-picker.js",
+        ];
+        for (const p of candidates) {
+          try {
+            // @vite-ignore for HA's dynamic module loader compatibility
+            await import(/* @vite-ignore */ p);
+            if (customElements.get("ha-service-picker")) break;
+          } catch (e) {
+            // ignore and try next
+          }
+        }
+        this.requestUpdate();
+      })();
+    }
+
+    if (customElements.get("ha-service-picker")) {
+      return html`
+        <ha-service-picker
+          .hass=${this.hass}
+          .label=${label}
+          .value=${val}
+          @value-changed=${(e) => {
+            e.stopPropagation();
+            onChange(e.detail?.value ?? "");
+          }}
+          @click=${(e) => e.stopPropagation()}
+        ></ha-service-picker>
+      `;
+    }
+
+    // Fallback: domain+service picker powered by hass.services.
     const services = this.hass?.services;
     const parts = safeString(val).split(".");
     const currentDomain = parts.length === 2 ? parts[0] : "";
