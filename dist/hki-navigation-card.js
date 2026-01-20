@@ -1927,49 +1927,101 @@ class HkiNavigationCardEditor extends LitElement {
         ${type === "url" ? html`<ha-textfield .label=${"URL"} .value=${act.url_path || ""} placeholder="https://example.com" @change=${(e) => update({ url_path: e.target.value })}></ha-textfield><ha-formfield .label=${"Open in new tab"}><ha-switch .checked=${act.new_tab !== false} @change=${(e) => update({ new_tab: e.target.checked })}></ha-switch></ha-formfield>` : html``}
         ${type === "toggle-group" ? html`<div class="grid2"><ha-select .label=${"Target group"} .value=${act.target || "vertical"} @selected=${(e) => update({ target: e.target.value })} @closed=${(e) => e.stopPropagation()}>${GROUP_TARGETS.map((g) => html`<mwc-list-item .value=${g.value}>${g.label}</mwc-list-item>`)}</ha-select><ha-select .label=${"Mode"} .value=${act.mode || "toggle"} @selected=${(e) => update({ mode: e.target.value })} @closed=${(e) => e.stopPropagation()}>${GROUP_ACTIONS.map((m) => html`<mwc-list-item .value=${m.value}>${m.label}</mwc-list-item>`)}</ha-select></div><div class="hint">Tip: Disable a group below, then use this action to open it temporarily. It auto-closes after pressing any other button.</div>` : html``}
         ${type === "perform-action" ? html`
-          <ha-textfield .label=${"Service (e.g., light.turn_on)"} .value=${act.perform_action || ""} placeholder="light.turn_on" @change=${(e) => update({ perform_action: e.target.value })}></ha-textfield>
-          ${act.perform_action ? html`
-            <ha-selector
+          ${customElements.get("ha-service-picker") ? html`
+            <ha-service-picker
               .hass=${this.hass}
-              .selector=${{ target: {} }}
-              .label=${"Target (optional)"}
-              .value=${act.target || null}
+              .label=${"Action (service)"}
+              .value=${act.perform_action || ""}
               @value-changed=${(ev) => {
                 ev.stopPropagation();
-                const target = ev.detail?.value;
-                if (JSON.stringify(act.target) !== JSON.stringify(target)) {
-                  if (target && Object.keys(target).length > 0) {
-                    update({ target: target });
-                  } else {
-                    const next = { ...act };
-                    delete next.target;
-                    setBtnFn({ ...btn, [which]: next });
-                  }
-                }
+                const v = ev.detail?.value ?? ev.target?.value ?? "";
+                update({ perform_action: safeString(v) });
               }}
               @click=${(e) => e.stopPropagation()}
-            ></ha-selector>
-            
-            <ha-yaml-editor
-              .hass=${this.hass}
-              .label=${"Service Data (optional, YAML)"}
-              .value=${act.data || null}
-              @value-changed=${(ev) => {
-                ev.stopPropagation();
-                const data = ev.detail?.value;
-                if (JSON.stringify(act.data) !== JSON.stringify(data)) {
-                  if (data && typeof data === 'object' && Object.keys(data).length > 0) {
-                    update({ data: data });
-                  } else {
-                    const next = { ...act };
-                    delete next.data;
-                    setBtnFn({ ...btn, [which]: next });
-                  }
+            ></ha-service-picker>
+          ` : html`
+            <div class="grid2">
+              <ha-select
+                .label=${"Domain"}
+                .value=${(safeString(act.perform_action).includes(".") ? safeString(act.perform_action).split(".")[0] : "")}
+                @selected=${(e) => {
+                  const domain = e.target.value;
+                  // Reset service when domain changes
+                  update({ perform_action: domain ? `${domain}.` : "" });
+                }}
+                @closed=${(e) => e.stopPropagation()}
+              >
+                <mwc-list-item value="">(select)</mwc-list-item>
+                ${Object.keys(this.hass?.services || {}).sort().map((d) => html`<mwc-list-item .value=${d}>${d}</mwc-list-item>`)}
+              </ha-select>
+              <ha-select
+                .label=${"Service"}
+                .disabled=${!safeString(act.perform_action).includes(".") || safeString(act.perform_action).endsWith(".")}
+                .value=${(() => {
+                  const s = safeString(act.perform_action);
+                  if (!s.includes(".")) return "";
+                  const parts = s.split(".");
+                  return parts[1] || "";
+                })()}
+                @selected=${(e) => {
+                  const current = safeString(act.perform_action);
+                  const domain = current.includes(".") ? current.split(".")[0] : "";
+                  const service = e.target.value;
+                  update({ perform_action: domain && service ? `${domain}.${service}` : current });
+                }}
+                @closed=${(e) => e.stopPropagation()}
+              >
+                <mwc-list-item value="">(select)</mwc-list-item>
+                ${(() => {
+                  const current = safeString(act.perform_action);
+                  const domain = current.includes(".") ? current.split(".")[0] : "";
+                  const services = (domain && this.hass?.services?.[domain]) ? Object.keys(this.hass.services[domain]).sort() : [];
+                  return services.map((s) => html`<mwc-list-item .value=${s}>${s}</mwc-list-item>`);
+                })()}
+              </ha-select>
+            </div>
+          `}
+
+          <ha-selector
+            .hass=${this.hass}
+            .selector=${{ target: {} }}
+            .label=${"Target (optional)"}
+            .value=${act.target || null}
+            @value-changed=${(ev) => {
+              ev.stopPropagation();
+              const target = ev.detail?.value;
+              if (JSON.stringify(act.target) !== JSON.stringify(target)) {
+                if (target && Object.keys(target).length > 0) {
+                  update({ target: target });
+                } else {
+                  const next = { ...act };
+                  delete next.target;
+                  setBtnFn({ ...btn, [which]: next });
                 }
-              }}
-              @click=${(e) => e.stopPropagation()}
-            ></ha-yaml-editor>
-          ` : ''}
+              }
+            }}
+            @click=${(e) => e.stopPropagation()}
+          ></ha-selector>
+
+          <ha-yaml-editor
+            .hass=${this.hass}
+            .label=${"Service Data (optional, YAML)"}
+            .value=${act.data || null}
+            @value-changed=${(ev) => {
+              ev.stopPropagation();
+              const data = ev.detail?.value;
+              if (JSON.stringify(act.data) !== JSON.stringify(data)) {
+                if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                  update({ data: data });
+                } else {
+                  const next = { ...act };
+                  delete next.data;
+                  setBtnFn({ ...btn, [which]: next });
+                }
+              }
+            }}
+            @click=${(e) => e.stopPropagation()}
+          ></ha-yaml-editor>
         ` : html``}
         ${type === "toggle" || type === "more-info" ? html`<div class="hint">Uses the button’s <b>Entity</b> field (set above in Interaction & Data).</div>` : html``}
         ${type === "back" ? html`<div class="hint">Back uses browser history. (Tap action forces icon to mdi:chevron-left.)</div>` : html``}
@@ -2298,7 +2350,7 @@ class HkiNavigationCardEditor extends LitElement {
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       .empty { opacity: 0.7; padding: 8px 2px; }
       ha-textfield, ha-select, ha-entity-picker, ha-selector, ha-yaml-editor { width: 100%; display: block; }
-      ha-expansion-panel { border-radius: 14px; overflow: hidden; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
+      ha-expansion-panel { border-radius: 14px; overflow: visible; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
       .btn-header { display: flex; align-items: center; gap: 10px; padding-right: 8px; }
       .btn-header-text { flex: 1; min-width: 0; }
       .btn-title { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
