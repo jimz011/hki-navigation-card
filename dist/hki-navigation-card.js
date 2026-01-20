@@ -1773,65 +1773,7 @@ class HkiNavigationCardEditor extends LitElement {
   static get properties() {
     return { hass: {}, _config: { state: true }, _expanded: { state: true }, _yamlErrors: { state: true } };
   }
-  constructor() { super(); this._expanded = {}; this._yamlErrors = {}; this._haUiLoaded = false; }
-
-  connectedCallback() {
-    super.connectedCallback();
-    // Ensure HA's built-in pickers/selectors are registered before we attempt to render them.
-    // Otherwise customElements.get(...) returns undefined and the selector element won't show.
-    this._ensureHaUi().catch(() => {});
-  }
-
-  async _ensureHaUi() {
-    if (this._haUiLoaded) return;
-    this._haUiLoaded = true;
-    const tryImport = async (path) => {
-      try {
-        await import(path);
-        return true;
-      } catch (e) {
-        return false;
-      }
-    };
-
-    // Try common HA build paths (varies by HA version / build).
-    const paths = [
-      // Core selector and common pickers
-      "/frontend_latest/src/components/ha-selector",
-      "/frontend_latest/src/components/ha-service-picker",
-      "/frontend_latest/src/components/ha-entity-picker",
-      "/frontend_latest/src/components/service/ha-service-picker",
-      "/frontend_latest/src/components/service/ha-service-picker.js",
-      "/frontend_latest/components/ha-selector.js",
-      "/frontend_latest/components/ha-service-picker.js",
-      "/frontend_latest/components/ha-entity-picker.js",
-      "/frontend_latest/panels/lovelace/editor/hui-action-editor.js",
-      "/frontend_latest/panels/lovelace/editor/action-editor/hui-action-editor.js",
-      "/frontend_latest/panels/lovelace/editor/action-editor/hui-action-editor",
-      "/frontend_latest/editor/hui-action-editor.js",
-      "/frontend_latest/lovelace/editor/hui-action-editor.js",
-      // Legacy / fallback builds
-      "/frontend_es5/src/components/ha-selector",
-      "/frontend_es5/src/components/ha-service-picker",
-      "/frontend_es5/src/components/ha-entity-picker",
-      "/frontend_es5/components/ha-selector.js",
-      "/frontend_es5/components/ha-service-picker.js",
-      "/frontend_es5/components/ha-entity-picker.js",
-      "/frontend_es5/panels/lovelace/editor/hui-action-editor.js",
-      // Lovelace editor bits (for action editing)
-      "/frontend_latest/src/panels/lovelace/editor/hui-action-editor",
-      "/frontend_es5/src/panels/lovelace/editor/hui-action-editor",
-    ];
-
-    for (const p of paths) {
-      // Stop early if we already have the key elements.
-      if (customElements.get("ha-service-picker") && customElements.get("ha-selector") && customElements.get("hui-action-editor")) break;
-      await tryImport(p);
-    }
-
-    // Re-render once components have had a chance to register.
-    this.requestUpdate();
-  }
+  constructor() { super(); this._expanded = {}; this._yamlErrors = {}; }
   setConfig(config) { this._config = normalizeConfig(config); }
   get _c() { return this._config || normalizeConfig({}); }
   _cleanupConfig(config) {
@@ -1956,129 +1898,6 @@ class HkiNavigationCardEditor extends LitElement {
     if (customElements.get("ha-selector")) return html`<ha-selector .hass=${this.hass} .label=${label} .selector=${{ navigation: {} }} .value=${val} @value-changed=${(e) => onChange(e.detail?.value ?? "")}></ha-selector>`;
     return html`<ha-textfield .label=${label} .value=${val} placeholder="/lovelace/0" @change=${(e) => onChange(e.target.value)}></ha-textfield>`;
   }
-  _renderServicePicker(label, value, onChange) {
-    const val = value || "";
-
-    // Try to use Home Assistant's built-in ha-service-picker (Bubble Card style).
-    // If it isn't registered yet, we attempt a few lazy imports and re-render when available.
-    if (!this._hkiServicePickerLoadAttempted) {
-      this._hkiServicePickerLoadAttempted = true;
-      (async () => {
-        if (customElements.get("ha-service-picker")) return;
-        const candidates = [
-          "/frontend_latest/components/ha-service-picker.js",
-          "/frontend_latest/src/components/ha-service-picker",
-          "/frontend_latest/src/components/ha-service-picker.js",
-          "/frontend_latest/components/ha-service-picker",
-          "/frontend_latest/components/ha-service-picker.ts",
-          "/frontend_latest/components/ha-service-picker",
-          "/frontend_es5/components/ha-service-picker.js",
-        ];
-        for (const p of candidates) {
-          try {
-            // @vite-ignore for HA's dynamic module loader compatibility
-            await import(/* @vite-ignore */ p);
-            if (customElements.get("ha-service-picker")) break;
-          } catch (e) {
-            // ignore and try next
-          }
-        }
-        this.requestUpdate();
-      })();
-    }
-
-    if (customElements.get("ha-service-picker")) {
-      return html`
-        <ha-service-picker
-          .hass=${this.hass}
-          .label=${label}
-          .value=${val}
-          @value-changed=${(e) => {
-            e.stopPropagation();
-            onChange(e.detail?.value ?? "");
-          }}
-          @click=${(e) => e.stopPropagation()}
-        ></ha-service-picker>
-      `;
-    }
-
-    // Fallback: domain+service picker powered by hass.services.
-    const services = this.hass?.services;
-    const parts = safeString(val).split(".");
-    const currentDomain = parts.length === 2 ? parts[0] : "";
-    const currentService = parts.length === 2 ? parts[1] : "";
-    // Temporary domain selection: when the user picks a new domain, prefer it until a service is chosen.
-    const tempDomain = safeString(this._servicePickerDomainTemp);
-    const hasTempDomain = !!tempDomain;
-
-    if (services && typeof services === "object") {
-      const domains = Object.keys(services).sort();
-      const domain = hasTempDomain
-        ? (domains.includes(tempDomain) ? tempDomain : "")
-        : (domains.includes(currentDomain) ? currentDomain : "");
-
-      const serviceNames = domain ? Object.keys(services[domain] || {}).sort() : [];
-      // When a temporary domain is active, reset service until the user picks one.
-      const service = hasTempDomain ? "" : (serviceNames.includes(currentService) ? currentService : "");
-      return html`
-        <div class="subheader" style="margin-top: 6px;">${label}</div>
-        <div class="grid2">
-          <ha-select
-            .label=${"Domain"}
-            .value=${domain || undefined}
-            @selected=${(e) => {
-              const d = e.target.value;
-              if (!d) {
-                // Clear selection + clear any partially built service.
-                this._servicePickerDomainTemp = "";
-                onChange("");
-              } else {
-                // Store domain temporarily; service list should refresh immediately.
-                this._servicePickerDomainTemp = d;
-              }
-              this.requestUpdate();
-            }}
-            @closed=${(e) => e.stopPropagation()}
-          >
-            <mwc-list-item value="">(clear)</mwc-list-item>
-            ${domains.map((d) => html`<mwc-list-item .value=${d}>${d}</mwc-list-item>`)}
-          </ha-select>
-
-          <ha-select
-            .label=${"Service"}
-            .value=${service || undefined}
-            ?disabled=${!domain}
-            @selected=${(e) => {
-              const svc = e.target.value;
-              if (!svc) {
-                // Clear only the chosen service; keep current domain selection.
-                onChange("");
-                this.requestUpdate();
-                return;
-              }
-              if (domain) {
-                this._servicePickerDomainTemp = "";
-                onChange(`${domain}.${svc}`);
-              }
-            }}
-            @closed=${(e) => e.stopPropagation()}
-          >
-            <mwc-list-item value="">(clear)</mwc-list-item>
-            ${serviceNames.map((s) => html`<mwc-list-item .value=${s}>${s}</mwc-list-item>`)}
-          </ha-select>
-        </div>
-        <div class="hint">Selected: <code>${domain && service ? `${domain}.${service}` : ""}</code></div>
-      `;
-    }
-
-    // Fallback (no hass.services yet)
-    return html`<ha-textfield
-      .label=${label}
-      .value=${val}
-      placeholder="light.turn_on"
-      @input=${(e) => onChange(e.target.value)}
-    ></ha-textfield>`;
-  }
   _renderCodeEditor(label, value, onChange, errorKey) {
     const showError = !!this._yamlErrors[errorKey];
     const validate = (v) => {
@@ -2108,92 +1927,49 @@ class HkiNavigationCardEditor extends LitElement {
         ${type === "url" ? html`<ha-textfield .label=${"URL"} .value=${act.url_path || ""} placeholder="https://example.com" @change=${(e) => update({ url_path: e.target.value })}></ha-textfield><ha-formfield .label=${"Open in new tab"}><ha-switch .checked=${act.new_tab !== false} @change=${(e) => update({ new_tab: e.target.checked })}></ha-switch></ha-formfield>` : html``}
         ${type === "toggle-group" ? html`<div class="grid2"><ha-select .label=${"Target group"} .value=${act.target || "vertical"} @selected=${(e) => update({ target: e.target.value })} @closed=${(e) => e.stopPropagation()}>${GROUP_TARGETS.map((g) => html`<mwc-list-item .value=${g.value}>${g.label}</mwc-list-item>`)}</ha-select><ha-select .label=${"Mode"} .value=${act.mode || "toggle"} @selected=${(e) => update({ mode: e.target.value })} @closed=${(e) => e.stopPropagation()}>${GROUP_ACTIONS.map((m) => html`<mwc-list-item .value=${m.value}>${m.label}</mwc-list-item>`)}</ha-select></div><div class="hint">Tip: Disable a group below, then use this action to open it temporarily. It auto-closes after pressing any other button.</div>` : html``}
         ${type === "perform-action" ? html`
-          ${customElements.get("hui-action-editor") ? html`
-            <hui-action-editor
+          <ha-textfield .label=${"Service (e.g., light.turn_on)"} .value=${act.perform_action || ""} placeholder="light.turn_on" @change=${(e) => update({ perform_action: e.target.value })}></ha-textfield>
+          ${act.perform_action ? html`
+            <ha-selector
               .hass=${this.hass}
-              .value=${{
-                // Use HA's native perform-action schema to unlock the modern searchable
-                // service selector UI (same as Bubble Card).
-                action: "perform-action",
-                perform_action: act.perform_action || "",
-                target: act.target || undefined,
-                data: act.data || undefined,
-              }}
+              .selector=${{ target: {} }}
+              .label=${"Target (optional)"}
+              .value=${act.target || null}
               @value-changed=${(ev) => {
                 ev.stopPropagation();
-                const v = ev.detail?.value || {};
-                const svc = typeof v.perform_action === "string" ? v.perform_action : (typeof v.service === "string" ? v.service : "");
-                const tgt = v.target && typeof v.target === "object" ? v.target : undefined;
-                const data = (v.data && typeof v.data === "object") ? v.data : ((v.service_data && typeof v.service_data === "object") ? v.service_data : undefined);
-
-                // Map HA's action-editor output back into HKI perform-action format
-                const next = { ...act, action: "perform-action", perform_action: svc };
-                if (tgt && Object.keys(tgt).length) next.target = tgt; else delete next.target;
-                if (data && Object.keys(data).length) next.data = data; else delete next.data;
-
-                setBtnFn({ ...btn, [which]: next });
+                const target = ev.detail?.value;
+                if (JSON.stringify(act.target) !== JSON.stringify(target)) {
+                  if (target && Object.keys(target).length > 0) {
+                    update({ target: target });
+                  } else {
+                    const next = { ...act };
+                    delete next.target;
+                    setBtnFn({ ...btn, [which]: next });
+                  }
+                }
               }}
-            ></hui-action-editor>
-            <div class="hint">Tip: After selecting an action/service, the target selector becomes available immediately.</div>
-          ` : html`
-            ${this._renderServicePicker("Action (service)", act.perform_action || "", (v) => update({ perform_action: v }))}
-            <div class="hint">Tip: After selecting an action/service, the target selector becomes available immediately.</div>
-            ${((act.perform_action || "").includes(".")) ? html`
-              <div class="spacer"></div>
-              <div class="subsection-title">Target (optional)</div>
-              <div class="row">
-                <ha-formfield .label="Use default entity">
-                  <ha-switch
-                    aria-label="Use default entity"
-                    .checked=${act?.target?.entity_id === "entity"}
-                    @change=${(e) => {
-                      const checked = e?.target?.checked;
-                      if (checked) update({ target: { ...(act.target || {}), entity_id: "entity" } });
-                      else {
-                        const t = { ...(act.target || {}) };
-                        delete t.entity_id;
-                        if (Object.keys(t).length) update({ target: t });
-                        else {
-                          const nn = { ...act }; delete nn.target; setBtnFn({ ...btn, [which]: nn });
-                        }
-                      }
-                    }}
-                  ></ha-switch>
-                  <div class="mdc-form-field"><label class="mdc-label">Use default entity</label></div>
-                </ha-formfield>
-              </div>
-              ${act?.target?.entity_id === "entity" ? html`` : html`
-                <div class="row">
-                  <ha-selector
-                    .hass=${this.hass}
-                    .selector=${{ target: {} }}
-                    .value=${act.target || {}}
-                    @value-changed=${(e) => {
-                      const v = e?.detail?.value;
-                      if (!v || (typeof v === 'object' && Object.keys(v).length === 0)) {
-                        const nn = { ...act }; delete nn.target; setBtnFn({ ...btn, [which]: nn });
-                      } else update({ target: v });
-                    }}
-                  ></ha-selector>
-                </div>
-              `}
-              <div class="spacer"></div>
-              <div class="subsection-title">Service Data (optional, YAML)</div>
-              <ha-yaml-editor
-                .hass=${this.hass}
-                .label=${""}
-                .defaultValue=${act.data || ""}
-                .value=${act.data || ""}
-                @value-changed=${(e) => {
-                  const t = e?.detail?.value ?? "";
-                  const errorKey = `${btn.id}:${which}:data`;
-                  try { parseYamlLite(String(t)); delete this._yamlErrors[errorKey]; } catch (err) { this._yamlErrors[errorKey] = String(err?.message || err); }
-                  update({ data: t });
-                }}
-              ></ha-yaml-editor>
-              ${this._yamlErrors?.[`${btn.id}:${which}:data`] ? html`<div class="error">${this._yamlErrors[`${btn.id}:${which}:data`]}</div>` : html``}
-            ` : html``}
-          `}
+              @click=${(e) => e.stopPropagation()}
+            ></ha-selector>
+            
+            <ha-yaml-editor
+              .hass=${this.hass}
+              .label=${"Service Data (optional, YAML)"}
+              .value=${act.data || null}
+              @value-changed=${(ev) => {
+                ev.stopPropagation();
+                const data = ev.detail?.value;
+                if (JSON.stringify(act.data) !== JSON.stringify(data)) {
+                  if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                    update({ data: data });
+                  } else {
+                    const next = { ...act };
+                    delete next.data;
+                    setBtnFn({ ...btn, [which]: next });
+                  }
+                }
+              }}
+              @click=${(e) => e.stopPropagation()}
+            ></ha-yaml-editor>
+          ` : ''}
         ` : html``}
         ${type === "toggle" || type === "more-info" ? html`<div class="hint">Uses the button’s <b>Entity</b> field (set above in Interaction & Data).</div>` : html``}
         ${type === "back" ? html`<div class="hint">Back uses browser history. (Tap action forces icon to mdi:chevron-left.)</div>` : html``}
@@ -2240,6 +2016,8 @@ class HkiNavigationCardEditor extends LitElement {
                   <ha-code-editor
                     .hass=${this.hass}
                     .mode=${"yaml"}
+                    autocomplete-entities
+                    .autocompleteEntities=${true}
                     .label=${"Label (accepts jinja2 templates)"}
                     .value=${btn.label ?? ""}
                     @value-changed=${(ev) => {
@@ -2518,10 +2296,9 @@ class HkiNavigationCardEditor extends LitElement {
       .section-title { font-weight: 800; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
       .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-      .grid2 > * { min-width: 0; }
       .empty { opacity: 0.7; padding: 8px 2px; }
       ha-textfield, ha-select, ha-entity-picker, ha-selector, ha-yaml-editor { width: 100%; display: block; }
-      ha-expansion-panel { border-radius: 14px; overflow: visible; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
+      ha-expansion-panel { border-radius: 14px; overflow: hidden; margin-top: 10px; background: rgba(0, 0, 0, 0.06); }
       .btn-header { display: flex; align-items: center; gap: 10px; padding-right: 8px; }
       .btn-header-text { flex: 1; min-width: 0; }
       .btn-title { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2543,7 +2320,7 @@ class HkiNavigationCardEditor extends LitElement {
         background: var(--secondary-background-color);
         border-radius: 4px;
         margin-bottom: 8px;
-        overflow: visible;
+        overflow: hidden;
         border: 1px solid var(--divider-color);
       }
       details.box-section > summary {
@@ -2574,7 +2351,7 @@ class HkiNavigationCardEditor extends LitElement {
       }
       
       /* Keep existing category styles for nested details */
-      details { margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(128, 128, 128, 0.15); overflow: visible; }
+      details { margin-bottom: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(128, 128, 128, 0.15); overflow: hidden; }
       details > summary { list-style: none; padding: 10px 12px; font-weight: 700; cursor: pointer; user-select: none; background: rgba(0,0,0,0.02); display: flex; align-items: center; outline: none; }
       details > summary::-webkit-details-marker { display: none; }
       details > summary::after { content: "▼"; font-size: 10px; margin-left: auto; opacity: 0.6; transition: transform 0.2s; }
