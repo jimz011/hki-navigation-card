@@ -154,10 +154,19 @@ function cleanupActionConflicts(actionObj) {
 function removeDefaults(obj, defaults) {
   if (!obj || !defaults) return obj;
   
+  // Critical properties that should always be preserved for config structure and Home Assistant compatibility
+  const criticalProps = ['type', 'base', 'horizontal', 'vertical'];
+  
   const cleaned = {};
   for (const key in obj) {
     const value = obj[key];
     const defaultValue = defaults[key];
+    
+    // Always preserve critical structural properties
+    if (criticalProps.includes(key)) {
+      cleaned[key] = value;
+      continue;
+    }
     
     // Skip if value matches default exactly
     if (JSON.stringify(value) === JSON.stringify(defaultValue)) {
