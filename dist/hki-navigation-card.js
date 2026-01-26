@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.2.0"; // Added action cleanup, minimal config, validation, better nesting, auto-migration // Added perform-action, jinja templating, collapsible sections
+const VERSION = "1.2.0"; // Fixed: Real-time template updates + unresponsive buttons after idle/navigation
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -916,8 +916,28 @@ class HkiNavigationCard extends LitElement {
         this._contentEl = null;
         this._rightPanelEl = null;
 
+        // Force immediate re-render to ensure buttons are responsive
+        this.requestUpdate();
         setTimeout(() => this._debouncedRefreshAndMeasure(), 50);
         setTimeout(() => this._debouncedRefreshAndMeasure(), 500);
+    };
+    
+    // Fix unresponsive buttons after idle/sleep
+    this._onVisibilityChange = () => {
+      if (!document.hidden) {
+        // Page became visible again - reconnect everything
+        console.log('[HKI Navigation Card] Page visible - reconnecting...');
+        this._reconnectTemplates();
+        this.requestUpdate();
+        setTimeout(() => this._debouncedRefreshAndMeasure(), 100);
+      }
+    };
+    
+    // Fix unresponsive buttons when hass connection is restored
+    this._onConnectionChange = () => {
+      console.log('[HKI Navigation Card] Connection change detected - reconnecting...');
+      this._reconnectTemplates();
+      this.requestUpdate();
     };
   }
 
@@ -925,6 +945,8 @@ class HkiNavigationCard extends LitElement {
     super.connectedCallback();
     window.addEventListener("resize", this._onResize);
     window.addEventListener("location-changed", this._onLocationChange);
+    document.addEventListener("visibilitychange", this._onVisibilityChange);
+    window.addEventListener("connection-status", this._onConnectionChange);
     
     // Fix: Invalidate cached DOM references on reconnect to ensure we aren't holding onto stale views
     this._contentEl = null;
@@ -944,6 +966,8 @@ class HkiNavigationCard extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener("resize", this._onResize);
     window.removeEventListener("location-changed", this._onLocationChange);
+    document.removeEventListener("visibilitychange", this._onVisibilityChange);
+    window.removeEventListener("connection-status", this._onConnectionChange);
     this._disconnectObservers();
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
     if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
@@ -964,11 +988,56 @@ class HkiNavigationCard extends LitElement {
     this._resizeObservers = [];
   }
 
+  _reconnectTemplates() {
+    // Force reconnect all template subscriptions after idle/visibility change
+    if (!this._config) return;
+    
+    const reconnectButton = (btn) => {
+      if (!btn || !btn.id) return;
+      // Re-setup label template if it exists
+      const labelRaw = btn.label || btn.tooltip || "";
+      if (labelRaw) {
+        this._setupBtnLabelTemplate(btn, labelRaw);
+      }
+    };
+    
+    // Reconnect base button
+    if (this._config.base?.button) {
+      reconnectButton(this._config.base.button);
+    }
+    
+    // Reconnect horizontal buttons
+    if (this._config.horizontal?.buttons) {
+      for (const btn of this._config.horizontal.buttons) {
+        reconnectButton(btn);
+      }
+    }
+    
+    // Reconnect vertical buttons
+    if (this._config.vertical?.buttons) {
+      for (const btn of this._config.vertical.buttons) {
+        reconnectButton(btn);
+      }
+    }
+  }
+
   updated(changedProps) {
     super.updated?.(changedProps);
     // If Hass was reconnected or we are just starting up, verify layout
-    if (changedProps.has("hass") && !this._layout.ready) {
+    if (changedProps.has("hass")) {
+      const oldHass = changedProps.get("hass");
+      const newHass = this.hass;
+      
+      // Hass became available or connection was restored
+      if ((!oldHass && newHass) || (oldHass && !newHass) || 
+          (oldHass?.connection?.connected !== newHass?.connection?.connected)) {
+        console.log('[HKI Navigation Card] Hass connection change detected - reconnecting templates...');
+        this._reconnectTemplates();
+      }
+      
+      if (!this._layout.ready) {
         this._scheduleMeasure();
+      }
     }
     this._refreshUiState(false, true);
     this._scheduleMeasure();
