@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.1.2"; // Added perform-action, jinja templating, collapsible sections
+const VERSION = "1.2.0"; // Fixed: Real-time template updates + unresponsive buttons after idle/navigation
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -119,6 +119,271 @@ const debounce = (func, wait) => {
     timeout = setTimeout(later, wait);
   };
 };
+
+
+// Action conflict mapping - when one action is set, these should be removed
+const ACTION_CONFLICTS = {
+  navigate: ['url', 'url_path', 'entity', 'service', 'data', 'target', 'mode', 'perform_action', 'new_tab'],
+  url: ['navigation_path', 'entity', 'service', 'data', 'target', 'mode', 'perform_action'],
+  toggle: ['navigation_path', 'url', 'url_path', 'service', 'data', 'target', 'mode', 'perform_action'],
+  'more-info': ['navigation_path', 'url', 'url_path', 'service', 'data', 'target', 'mode', 'perform_action'],
+  'perform-action': ['navigation_path', 'url', 'url_path', 'entity', 'mode', 'target'],
+  'toggle-group': ['navigation_path', 'url', 'url_path', 'entity', 'service', 'data', 'perform_action'],
+  back: ['navigation_path', 'url', 'url_path', 'entity', 'service', 'data', 'target', 'mode', 'perform_action'],
+  none: ['navigation_path', 'url', 'url_path', 'entity', 'service', 'data', 'target', 'mode', 'perform_action'],
+};
+
+// Helper to cleanup conflicting action properties
+function cleanupActionConflicts(actionObj) {
+  if (!actionObj || !actionObj.action) return actionObj;
+  
+  const conflicts = ACTION_CONFLICTS[actionObj.action];
+  if (!conflicts) return actionObj;
+  
+  const cleaned = { ...actionObj };
+  conflicts.forEach(key => {
+    if (key in cleaned) {
+      delete cleaned[key];
+    }
+  });
+  
+  return cleaned;
+}
+
+// Helper to remove default values from config (for minimal YAML)
+function removeDefaults(obj, defaults) {
+  if (!obj || !defaults) return obj;
+  
+  // Critical properties that should always be preserved for config structure and Home Assistant compatibility
+  const criticalProps = ['type', 'base', 'horizontal', 'vertical'];
+  
+  const cleaned = {};
+  for (const key in obj) {
+    const value = obj[key];
+    const defaultValue = defaults[key];
+    
+    // Always preserve critical structural properties
+    if (criticalProps.includes(key)) {
+      cleaned[key] = value;
+      continue;
+    }
+    
+    // Skip if value matches default exactly
+    if (JSON.stringify(value) === JSON.stringify(defaultValue)) {
+      continue;
+    }
+    
+    // Recursively clean nested objects
+    if (value && typeof value === 'object' && !Array.isArray(value) && 
+        defaultValue && typeof defaultValue === 'object' && !Array.isArray(defaultValue)) {
+      const cleanedNested = removeDefaults(value, defaultValue);
+      if (Object.keys(cleanedNested).length > 0) {
+        cleaned[key] = cleanedNested;
+      }
+    } else {
+      cleaned[key] = value;
+    }
+  }
+  
+  return cleaned;
+}
+
+// Helper to migrate old flat config to new nested structure
+function migrateConfig(config) {
+  if (!config) return config;
+  
+  const migrated = { ...config };
+  let needsMigration = false;
+  
+  // Check if old flat structure exists
+  const oldBottomBarKeys = ['bottom_bar_enabled', 'bottom_bar_full_width', 'bottom_bar_height', 
+    'bottom_bar_color', 'bottom_bar_opacity', 'bottom_bar_border_radius', 'bottom_bar_bottom_offset',
+    'bottom_bar_box_shadow', 'bottom_bar_margin_left', 'bottom_bar_margin_right', 
+    'bottom_bar_border_width', 'bottom_bar_border_style', 'bottom_bar_border_color'];
+  
+  const hasOldBottomBar = oldBottomBarKeys.some(key => migrated[key] !== undefined);
+  
+  // Migrate bottom bar to nested structure
+  if (hasOldBottomBar && !migrated.bottom_bar_settings) {
+    needsMigration = true;
+    migrated.bottom_bar_settings = {};
+    
+    if (migrated.bottom_bar_enabled !== undefined) {
+      migrated.bottom_bar_settings.enabled = migrated.bottom_bar_enabled;
+      delete migrated.bottom_bar_enabled;
+    }
+    if (migrated.bottom_bar_full_width !== undefined) {
+      migrated.bottom_bar_settings.full_width = migrated.bottom_bar_full_width;
+      delete migrated.bottom_bar_full_width;
+    }
+    if (migrated.bottom_bar_height !== undefined) {
+      migrated.bottom_bar_settings.height = migrated.bottom_bar_height;
+      delete migrated.bottom_bar_height;
+    }
+    if (migrated.bottom_bar_bottom_offset !== undefined) {
+      migrated.bottom_bar_settings.bottom_offset = migrated.bottom_bar_bottom_offset;
+      delete migrated.bottom_bar_bottom_offset;
+    }
+    if (migrated.bottom_bar_margin_left !== undefined) {
+      migrated.bottom_bar_settings.margin_left = migrated.bottom_bar_margin_left;
+      delete migrated.bottom_bar_margin_left;
+    }
+    if (migrated.bottom_bar_margin_right !== undefined) {
+      migrated.bottom_bar_settings.margin_right = migrated.bottom_bar_margin_right;
+      delete migrated.bottom_bar_margin_right;
+    }
+    
+    // Migrate bottom bar style properties
+    if (!migrated.bottom_bar_settings.style) {
+      migrated.bottom_bar_settings.style = {};
+    }
+    
+    if (migrated.bottom_bar_color !== undefined) {
+      migrated.bottom_bar_settings.style.background = migrated.bottom_bar_color;
+      delete migrated.bottom_bar_color;
+    }
+    if (migrated.bottom_bar_opacity !== undefined) {
+      migrated.bottom_bar_settings.style.opacity = migrated.bottom_bar_opacity;
+      delete migrated.bottom_bar_opacity;
+    }
+    if (migrated.bottom_bar_border_radius !== undefined) {
+      migrated.bottom_bar_settings.style.border_radius = migrated.bottom_bar_border_radius;
+      delete migrated.bottom_bar_border_radius;
+    }
+    if (migrated.bottom_bar_box_shadow !== undefined) {
+      migrated.bottom_bar_settings.style.box_shadow = migrated.bottom_bar_box_shadow;
+      delete migrated.bottom_bar_box_shadow;
+    }
+    if (migrated.bottom_bar_border_width !== undefined) {
+      migrated.bottom_bar_settings.style.border_width = migrated.bottom_bar_border_width;
+      delete migrated.bottom_bar_border_width;
+    }
+    if (migrated.bottom_bar_border_style !== undefined) {
+      migrated.bottom_bar_settings.style.border_style = migrated.bottom_bar_border_style;
+      delete migrated.bottom_bar_border_style;
+    }
+    if (migrated.bottom_bar_border_color !== undefined) {
+      migrated.bottom_bar_settings.style.border_color = migrated.bottom_bar_border_color;
+      delete migrated.bottom_bar_border_color;
+    }
+  }
+  
+  // Migrate button default styles to nested structure
+  const oldStyleKeys = ['default_background', 'default_button_opacity', 'default_icon_color',
+    'default_border_radius', 'default_border_width', 'default_border_style', 'default_border_color',
+    'button_box_shadow', 'button_box_shadow_hover'];
+  
+  const hasOldStyles = oldStyleKeys.some(key => migrated[key] !== undefined);
+  
+  if (hasOldStyles && !migrated.button_defaults) {
+    needsMigration = true;
+    migrated.button_defaults = { style: {} };
+    
+    if (migrated.default_background !== undefined) {
+      migrated.button_defaults.style.background = migrated.default_background;
+      delete migrated.default_background;
+    }
+    if (migrated.default_button_opacity !== undefined) {
+      migrated.button_defaults.style.opacity = migrated.default_button_opacity;
+      delete migrated.default_button_opacity;
+    }
+    if (migrated.default_icon_color !== undefined) {
+      migrated.button_defaults.style.icon_color = migrated.default_icon_color;
+      delete migrated.default_icon_color;
+    }
+    if (migrated.default_border_radius !== undefined) {
+      migrated.button_defaults.style.border_radius = migrated.default_border_radius;
+      delete migrated.default_border_radius;
+    }
+    if (migrated.default_border_width !== undefined) {
+      migrated.button_defaults.style.border_width = migrated.default_border_width;
+      delete migrated.default_border_width;
+    }
+    if (migrated.default_border_style !== undefined) {
+      migrated.button_defaults.style.border_style = migrated.default_border_style;
+      delete migrated.default_border_style;
+    }
+    if (migrated.default_border_color !== undefined) {
+      migrated.button_defaults.style.border_color = migrated.default_border_color;
+      delete migrated.default_border_color;
+    }
+    if (migrated.button_box_shadow !== undefined) {
+      migrated.button_defaults.style.box_shadow = migrated.button_box_shadow;
+      delete migrated.button_box_shadow;
+    }
+    if (migrated.button_box_shadow_hover !== undefined) {
+      migrated.button_defaults.style.box_shadow_hover = migrated.button_box_shadow_hover;
+      delete migrated.button_box_shadow_hover;
+    }
+  }
+  
+  // Migrate label_style if it exists at top level
+  if (migrated.label_style && !migrated.button_defaults?.label) {
+    needsMigration = true;
+    if (!migrated.button_defaults) migrated.button_defaults = {};
+    migrated.button_defaults.label = migrated.label_style;
+    delete migrated.label_style;
+  }
+  
+  if (needsMigration) {
+    console.info('[HKI Navigation Card] Auto-migrated config to new nested structure');
+  }
+  
+  return migrated;
+}
+
+// Helper to clean up and validate config
+function cleanupAndValidateConfig(config) {
+  if (!config) return config;
+  
+  const cleaned = deepClone(config);
+  
+  // Clean up button actions
+  const cleanButtons = (buttons) => {
+    if (!Array.isArray(buttons)) return buttons;
+    return buttons.map(btn => {
+      const cleanedBtn = { ...btn };
+      
+      // Clean up tap_action
+      if (cleanedBtn.tap_action) {
+        cleanedBtn.tap_action = cleanupActionConflicts(cleanedBtn.tap_action);
+      }
+      
+      // Clean up hold_action
+      if (cleanedBtn.hold_action) {
+        cleanedBtn.hold_action = cleanupActionConflicts(cleanedBtn.hold_action);
+      }
+      
+      // Clean up double_tap_action
+      if (cleanedBtn.double_tap_action) {
+        cleanedBtn.double_tap_action = cleanupActionConflicts(cleanedBtn.double_tap_action);
+      }
+      
+      return cleanedBtn;
+    });
+  };
+  
+  // Clean base button
+  if (cleaned.base?.button) {
+    const btn = cleaned.base.button;
+    if (btn.tap_action) btn.tap_action = cleanupActionConflicts(btn.tap_action);
+    if (btn.hold_action) btn.hold_action = cleanupActionConflicts(btn.hold_action);
+    if (btn.double_tap_action) btn.double_tap_action = cleanupActionConflicts(btn.double_tap_action);
+  }
+  
+  // Clean horizontal buttons
+  if (cleaned.horizontal?.buttons) {
+    cleaned.horizontal.buttons = cleanButtons(cleaned.horizontal.buttons);
+  }
+  
+  // Clean vertical buttons
+  if (cleaned.vertical?.buttons) {
+    cleaned.vertical.buttons = cleanButtons(cleaned.vertical.buttons);
+  }
+  
+  return cleaned;
+}
+
 
 function _uid() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
@@ -476,6 +741,11 @@ function inferButtonTypeFromLegacy(btn, configDefaultType) {
 }
 
 function normalizeConfig(cfg) {
+  // Auto-migrate old config to new nested structure
+  cfg = migrateConfig(cfg);
+  // Clean up and validate config
+  cfg = cleanupAndValidateConfig(cfg);
+
   const raw = { ...DEFAULTS, ...(cfg || {}) };
   const base = { ...(raw.base || {}) };
   base.button = { ...DEFAULT_BUTTON(), ...(base.button || {}) };
@@ -646,8 +916,28 @@ class HkiNavigationCard extends LitElement {
         this._contentEl = null;
         this._rightPanelEl = null;
 
+        // Force immediate re-render to ensure buttons are responsive
+        this.requestUpdate();
         setTimeout(() => this._debouncedRefreshAndMeasure(), 50);
         setTimeout(() => this._debouncedRefreshAndMeasure(), 500);
+    };
+    
+    // Fix unresponsive buttons after idle/sleep
+    this._onVisibilityChange = () => {
+      if (!document.hidden) {
+        // Page became visible again - reconnect everything
+        console.log('[HKI Navigation Card] Page visible - reconnecting...');
+        this._reconnectTemplates();
+        this.requestUpdate();
+        setTimeout(() => this._debouncedRefreshAndMeasure(), 100);
+      }
+    };
+    
+    // Fix unresponsive buttons when hass connection is restored
+    this._onConnectionChange = () => {
+      console.log('[HKI Navigation Card] Connection change detected - reconnecting...');
+      this._reconnectTemplates();
+      this.requestUpdate();
     };
   }
 
@@ -655,6 +945,8 @@ class HkiNavigationCard extends LitElement {
     super.connectedCallback();
     window.addEventListener("resize", this._onResize);
     window.addEventListener("location-changed", this._onLocationChange);
+    document.addEventListener("visibilitychange", this._onVisibilityChange);
+    window.addEventListener("connection-status", this._onConnectionChange);
     
     // Fix: Invalidate cached DOM references on reconnect to ensure we aren't holding onto stale views
     this._contentEl = null;
@@ -674,6 +966,8 @@ class HkiNavigationCard extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener("resize", this._onResize);
     window.removeEventListener("location-changed", this._onLocationChange);
+    document.removeEventListener("visibilitychange", this._onVisibilityChange);
+    window.removeEventListener("connection-status", this._onConnectionChange);
     this._disconnectObservers();
     if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
     if (this._bottomBarMeasureRaf) cancelAnimationFrame(this._bottomBarMeasureRaf);
@@ -694,11 +988,56 @@ class HkiNavigationCard extends LitElement {
     this._resizeObservers = [];
   }
 
+  _reconnectTemplates() {
+    // Force reconnect all template subscriptions after idle/visibility change
+    if (!this._config) return;
+    
+    const reconnectButton = (btn) => {
+      if (!btn || !btn.id) return;
+      // Re-setup label template if it exists
+      const labelRaw = btn.label || btn.tooltip || "";
+      if (labelRaw) {
+        this._setupBtnLabelTemplate(btn, labelRaw);
+      }
+    };
+    
+    // Reconnect base button
+    if (this._config.base?.button) {
+      reconnectButton(this._config.base.button);
+    }
+    
+    // Reconnect horizontal buttons
+    if (this._config.horizontal?.buttons) {
+      for (const btn of this._config.horizontal.buttons) {
+        reconnectButton(btn);
+      }
+    }
+    
+    // Reconnect vertical buttons
+    if (this._config.vertical?.buttons) {
+      for (const btn of this._config.vertical.buttons) {
+        reconnectButton(btn);
+      }
+    }
+  }
+
   updated(changedProps) {
     super.updated?.(changedProps);
     // If Hass was reconnected or we are just starting up, verify layout
-    if (changedProps.has("hass") && !this._layout.ready) {
+    if (changedProps.has("hass")) {
+      const oldHass = changedProps.get("hass");
+      const newHass = this.hass;
+      
+      // Hass became available or connection was restored
+      if ((!oldHass && newHass) || (oldHass && !newHass) || 
+          (oldHass?.connection?.connected !== newHass?.connection?.connected)) {
+        console.log('[HKI Navigation Card] Hass connection change detected - reconnecting templates...');
+        this._reconnectTemplates();
+      }
+      
+      if (!this._layout.ready) {
         this._scheduleMeasure();
+      }
     }
     this._refreshUiState(false, true);
     this._scheduleMeasure();
@@ -1820,7 +2159,11 @@ class HkiNavigationCardEditor extends LitElement {
   _emit(cfg) { 
     const cleaned = this._cleanupConfig(cfg);
     this._config = cleaned; 
-    fireEvent(this, "config-changed", { config: cleaned }); 
+    
+    // Remove defaults for minimal config
+    const minimal = removeDefaults(cleaned, DEFAULTS);
+    this._config = minimal;
+    fireEvent(this, "config-changed", { config: minimal });
   }
   _applyGlobalAndClearOverrides(keyPath, mutateFn) {
     const cfg = deepClone(this._c);
@@ -1916,7 +2259,12 @@ class HkiNavigationCardEditor extends LitElement {
     const errorKey = `${errorKeyPrefix}:${which}`;
     const update = (patch) => {
       const current = btn?.[which] || { action: "none" };
-      const next = { ...btn, [which]: { ...current, ...patch } };
+      let nextAction = { ...current, ...patch };
+      // Clean up conflicts when action type changes
+      if (patch.action) {
+        nextAction = cleanupActionConflicts(nextAction);
+      }
+      const next = { ...btn, [which]: nextAction };
       if (which === "tap_action" && patch.action === "back") next.icon = "mdi:chevron-left";
       setBtnFn(next);
     };
