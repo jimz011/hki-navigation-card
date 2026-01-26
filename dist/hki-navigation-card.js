@@ -2087,8 +2087,6 @@ class HkiNavigationCardEditor extends LitElement {
     this._config = minimal;
     fireEvent(this, "config-changed", { config: minimal });
   }
-
-  }
   _applyGlobalAndClearOverrides(keyPath, mutateFn) {
     const cfg = deepClone(this._c);
     mutateFn(cfg);
