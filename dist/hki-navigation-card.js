@@ -18,7 +18,7 @@ const _getLit = () => {
 const { LitElement, html, css } = _getLit();
 
 const CARD_TYPE = "hki-navigation-card";
-const VERSION = "1.2.0"; // Fixed: Real-time template updates + unresponsive buttons after idle/navigation
+const VERSION = "1.2.1"; // Fixed: Real-time template updates + unresponsive buttons after idle/navigation
 
 console.info(
     '%c HKI-NAVIGATION-CARD %c v' + VERSION + ' ',
@@ -129,6 +129,7 @@ const ACTION_CONFLICTS = {
   'more-info': ['navigation_path', 'url', 'url_path', 'service', 'data', 'target', 'mode', 'perform_action'],
   'perform-action': ['navigation_path', 'url', 'url_path', 'entity', 'mode', 'target'],
   'toggle-group': ['navigation_path', 'url', 'url_path', 'entity', 'service', 'data', 'perform_action'],
+  'fire-dom-event': ['navigation_path', 'url', 'url_path', 'entity', 'service', 'data', 'target', 'mode', 'perform_action'],
   back: ['navigation_path', 'url', 'url_path', 'entity', 'service', 'data', 'target', 'mode', 'perform_action'],
   none: ['navigation_path', 'url', 'url_path', 'entity', 'service', 'data', 'target', 'mode', 'perform_action'],
 };
@@ -1855,6 +1856,18 @@ class HkiNavigationCard extends LitElement {
       const targetEntity = safeString(action.target_entity || "").trim();
       if (targetEntity) data = { ...(data || {}), entity_id: targetEntity };
       hass.callService(domain, service, data || {});
+      this._autoCloseTempMenus();
+      return;
+    }
+    if (type === "fire-dom-event") {
+      // Fire a custom DOM event with all properties except 'action'
+      const eventDetail = {};
+      Object.keys(action).forEach(key => {
+        if (key !== 'action') {
+          eventDetail[key] = action[key];
+        }
+      });
+      fireEvent(this, "ll-custom", eventDetail);
       this._autoCloseTempMenus();
       return;
     }
